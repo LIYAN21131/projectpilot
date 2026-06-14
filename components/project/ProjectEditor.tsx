@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Clipboard, FileText, Save, SendHorizontal, Upload } from "lucide-react";
+import { AlertTriangle, Clipboard, FileText, RefreshCw, Save, SendHorizontal, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/common/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Input, Select, Textarea } from "@/components/common/Field";
 import { Toast } from "@/components/common/Toast";
-import { optimizeResumeWithAI } from "@/lib/ai/client";
+import { optimizeResumeWithAIOrThrow } from "@/lib/ai/client";
 import { formatProjectMetrics } from "@/lib/ai/extractProjectMetrics";
 import {
   checkProjectMissingFields,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/rules/projectRules";
 import { trackEvent } from "@/lib/analytics";
 import { targetRoles } from "@/lib/mock/projects";
+import { mapStructuredResultToProject, parseStructuredProject } from "@/lib/project/structuredProjectParser";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
 import type { Project } from "@/types/project";
 import type { ResumeOptimizationResult } from "@/types/resume";
@@ -48,69 +49,77 @@ const sections = [
 
 const unrecognizedContent = "未识别到内容";
 
-const extractionFields = [
-  { key: "name", labels: ["项目名称", "项目名", "名称"] },
-  { key: "background", labels: ["项目背景", "背景"] },
-  { key: "painPoints", labels: ["用户痛点", "痛点", "核心痛点"] },
-  { key: "targetUsers", labels: ["目标用户", "用户群体", "服务用户", "面向用户"] },
-  { key: "solution", labels: ["解决方案", "产品方案", "方案"] },
-  { key: "responsibilities", labels: ["个人职责", "我的职责", "职责", "负责内容"] },
-  { key: "results", labels: ["项目成果", "成果", "产出", "项目产出"] },
-  { key: "metrics", labels: ["数据指标", "指标", "量化指标"] },
-  { key: "review", labels: ["项目复盘", "复盘", "总结反思"] },
-] as const;
+const sourceTextMaxLength = 5000;
+const sourceTextMinLength = 30;
+const aiCoreFields: Array<keyof Project> = ["background", "painPoints", "solution", "responsibilities", "metrics"];
+const aiFillableFields: Array<{ key: keyof Project; label: string }> = [
+  { key: "name", label: "项目名称" },
+  { key: "background", label: "项目背景" },
+  { key: "painPoints", label: "用户痛点" },
+  { key: "targetUsers", label: "目标用户" },
+  { key: "solution", label: "解决方案" },
+  { key: "responsibilities", label: "个人职责" },
+  { key: "results", label: "项目成果" },
+  { key: "metrics", label: "数据指标" },
+];
 
-const allExtractionLabels = extractionFields.flatMap((field) => field.labels);
+type ExceptionEventName =
+  | "input_empty_error"
+  | "input_too_short_error"
+  | "generate_failed"
+  | "generate_empty_result"
+  | "generate_format_error"
+  | "copy_failed"
+  | "save_failed";
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+type GenerateErrorState = {
+  type: "failed" | "empty" | "format";
+  message: string;
+  detail: string;
+};
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
-function isLabeledLine(line: string) {
-  return allExtractionLabels.some((label) => new RegExp(`^\\s*${escapeRegExp(label)}\\s*[：:]`).test(line));
+function hasUsableProjectContent(project: Project) {
+  return [
+    project.name,
+    project.background,
+    project.targetUsers,
+    project.painPoints,
+    project.solution,
+    project.responsibilities,
+    project.results,
+    project.metrics,
+    project.review,
+  ].some((value) => value.trim() && value.trim() !== unrecognizedContent);
 }
 
-function extractFieldValue(source: string, labels: readonly string[]) {
-  const lines = source.replace(/\r\n?/g, "\n").split("\n");
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const matchedLabel = labels.find((label) => new RegExp(`^\\s*${escapeRegExp(label)}\\s*[：:]`).test(line));
-
-    if (!matchedLabel) continue;
-
-    const firstLineValue = line.replace(new RegExp(`^\\s*${escapeRegExp(matchedLabel)}\\s*[：:]\\s*`), "");
-    const valueLines = [firstLineValue];
-
-    for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
-      const nextLine = lines[nextIndex];
-      if (isLabeledLine(nextLine)) break;
-      valueLines.push(nextLine);
-    }
-
-    const value = valueLines.join("\n").trim();
-    return value || unrecognizedContent;
-  }
-
-  return unrecognizedContent;
+function hasUsableOptimization(result?: ResumeOptimizationResult) {
+  return Boolean(result?.optimizedContent?.trim() || result?.suggestions?.some((item) => item.trim()));
 }
 
-function extractProjectByMock(source: string, _fileName?: string): Project {
-  void _fileName;
+function hasRecognizedCoreField(project: Project) {
+  return aiCoreFields.some((key) => project[key].trim());
+}
+
+function getMissingAiFields(project: Project) {
+  return aiFillableFields.filter((field) => !project[field.key].trim());
+}
+
+function parseProjectFromSource(source: string) {
   const base = emptyProject();
   const text = source.trim();
-
-  const extractedProject = extractionFields.reduce(
-    (project, field) => ({
-      ...project,
-      [field.key]: extractFieldValue(text, field.labels),
-    }),
-    base,
-  );
+  const { result, validation } = parseStructuredProject(text);
+  const extractedProject = mapStructuredResultToProject(result, base);
 
   return {
-    ...extractedProject,
-    metrics: formatProjectMetrics(extractedProject, text),
+    project: {
+      ...extractedProject,
+      metrics: extractedProject.metrics || formatProjectMetrics(extractedProject, text),
+    },
+    validation,
   };
 }
 
@@ -154,7 +163,6 @@ export function ProjectEditor() {
   const [creationMode, setCreationMode] = useState<"ai" | "manual">("ai");
   const [draft, setDraft] = useState<Project>(emptyProject());
   const [sourceText, setSourceText] = useState("");
-  const [sourceName, setSourceName] = useState("");
   const [targetRole, setTargetRole] = useState("产品经理");
   const [optimization, setOptimization] = useState<ResumeOptimizationResult | undefined>();
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -163,6 +171,10 @@ export function ProjectEditor() {
   const [isCopyingOptimized, setIsCopyingOptimized] = useState(false);
   const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState("");
+  const [sourceTextError, setSourceTextError] = useState("");
+  const [generateError, setGenerateError] = useState<GenerateErrorState | undefined>();
+  const [saveError, setSaveError] = useState("");
+  const [aiMissingFields, setAiMissingFields] = useState<Array<{ key: keyof Project; label: string }>>([]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedId),
@@ -176,12 +188,20 @@ export function ProjectEditor() {
   const isEditingProject = Boolean(selectedProject);
   const formTitle = isEditingProject ? `编辑项目：${activeProject.name || "未命名项目"}` : "新建项目";
   const modeLabel = isEditingProject ? "编辑项目" : "新建项目";
+  const missingAiFieldKeys = useMemo(
+    () => new Set(aiMissingFields.map((field) => field.key)),
+    [aiMissingFields],
+  );
 
   function createNew(mode: "ai" | "manual") {
     setCreationMode(mode);
     setSelectedId("");
     setDraft(emptyProject());
     setOptimization(undefined);
+    setSourceTextError("");
+    setGenerateError(undefined);
+    setSaveError("");
+    setAiMissingFields([]);
   }
 
   function startNewProject() {
@@ -193,10 +213,17 @@ export function ProjectEditor() {
     setSelectedId(project.id);
     setDraft(project);
     setOptimization(resumeResults.find((result) => result.projectId === project.id));
+    setGenerateError(undefined);
+    setSaveError("");
+    setAiMissingFields([]);
     window.setTimeout(() => document.getElementById("创建方式")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
   function updateField(key: keyof Project, value: string) {
+    if (saveError) setSaveError("");
+    if (aiMissingFields.some((field) => field.key === key) && value.trim()) {
+      setAiMissingFields((current) => current.filter((field) => field.key !== key));
+    }
     setDraft((current) => ({ ...current, [key]: value, updatedAt: new Date().toISOString() }));
   }
 
@@ -205,34 +232,117 @@ export function ProjectEditor() {
     window.setTimeout(() => setToastMessage(""), 2600);
   }
 
+  function trackException(
+    name: ExceptionEventName,
+    scenario: string,
+    errorMessage: string,
+    currentStep: string,
+    inputLength = sourceText.trim().length,
+  ) {
+    trackEvent(name, {
+      scenario,
+      input_length: inputLength,
+      error_message: errorMessage.slice(0, 180),
+      current_step: currentStep,
+    });
+  }
+
+  function updateSourceText(value: string) {
+    const nextValue = value.slice(0, sourceTextMaxLength);
+    setSourceText(nextValue);
+
+    if (nextValue.length >= sourceTextMaxLength) {
+      setSourceTextError("已达到字数上限，请精简后再生成");
+      return;
+    }
+
+    if (sourceTextError) {
+      setSourceTextError("");
+    }
+  }
+
+  function validateSourceBeforeGenerate() {
+    const inputLength = sourceText.trim().length;
+
+    if (!inputLength) {
+      const message = "请先输入你的项目经历或简历内容";
+      setSourceTextError(message);
+      showToast(message);
+      trackException("input_empty_error", "source_text_empty", message, "input", 0);
+      return false;
+    }
+
+    if (inputLength < sourceTextMinLength) {
+      const message = "内容太少，建议补充项目背景、你的职责、结果数据";
+      setSourceTextError(message);
+      showToast(message);
+      trackException("input_too_short_error", "source_text_too_short", message, "input", inputLength);
+      return false;
+    }
+
+    if (sourceText.length > sourceTextMaxLength) {
+      const message = "已达到字数上限，请精简后再生成";
+      setSourceTextError(message);
+      showToast(message);
+      return false;
+    }
+
+    setSourceTextError("");
+    return true;
+  }
+
+  function applyRecognizedProject(project: Project) {
+    const missingFields = getMissingAiFields(project);
+    setDraft(project);
+    setSelectedId("");
+    setAiMissingFields(missingFields);
+    setSourceTextError("");
+
+    if (missingFields.length) {
+      showToast("AI已完成初步整理，部分字段建议补充完善");
+      return;
+    }
+
+    showToast("识别完成，请确认项目信息");
+  }
+
   async function handleFile(file?: File) {
     if (!file) return;
-    setSourceName(file.name);
     let text = "";
     if (file.type.startsWith("text/") || file.name.endsWith(".txt")) {
       text = await file.text();
-      setSourceText(text);
+      updateSourceText(text);
     }
-    setDraft(extractProjectByMock(text, file.name));
-    setSelectedId("");
+    const parsed = parseProjectFromSource(text);
+    if (!hasRecognizedCoreField(parsed.project)) {
+      showToast("未识别到可填充的项目字段，请补充更多项目资料");
+      return;
+    }
+
+    applyRecognizedProject(parsed.project);
   }
 
   async function identifyFromText() {
     const rawProjectContent = sourceText.trim();
 
-    if (!rawProjectContent) {
-      showToast("请先粘贴项目资料。");
+    if (!validateSourceBeforeGenerate()) {
       return;
     }
 
     if (isRecognizing) return;
     setIsRecognizing(true);
+    setGenerateError(undefined);
 
     try {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
-      setDraft(extractProjectByMock(rawProjectContent, sourceName));
-      setSelectedId("");
-      showToast("识别完成，请确认项目信息");
+      const parsed = parseProjectFromSource(rawProjectContent);
+
+      if (!hasRecognizedCoreField(parsed.project)) {
+        showToast("未识别到可填充的项目字段，请补充更多项目资料");
+        return;
+      }
+
+      applyRecognizedProject(parsed.project);
     } catch {
       showToast("识别失败，请重试");
     } finally {
@@ -242,7 +352,17 @@ export function ProjectEditor() {
 
   async function saveProject() {
     if (isSaving) return;
+
+    if (!hasUsableProjectContent(draft)) {
+      const message = "请先生成内容后再保存";
+      setSaveError(message);
+      showToast(message);
+      trackException("save_failed", "save_without_generated_content", message, "save", sourceText.trim().length);
+      return;
+    }
+
     setIsSaving(true);
+    setSaveError("");
 
     try {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -258,8 +378,11 @@ export function ProjectEditor() {
       trackEvent(isNew ? "project_created" : "project_updated", { projectId: normalized.id });
       showToast(isNew ? "项目已保存到项目列表" : "项目修改已保存");
       window.setTimeout(() => document.getElementById(`project-card-${normalized.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
-    } catch {
-      showToast("保存失败，请重试");
+    } catch (error) {
+      const message = "保存失败，请稍后重试";
+      setSaveError(message);
+      showToast(message);
+      trackException("save_failed", "project_save_failed", getErrorMessage(error), "save", sourceText.trim().length);
     } finally {
       setIsSaving(false);
     }
@@ -294,15 +417,60 @@ export function ProjectEditor() {
   async function startOptimization() {
     if (isOptimizing) return;
     setIsOptimizing(true);
+    setGenerateError(undefined);
 
     try {
-      const result = await optimizeResumeWithAI(activeProject, targetRole);
+      const result = await optimizeResumeWithAIOrThrow(activeProject, targetRole);
+
+      if (!hasUsableOptimization(result)) {
+        const message = "本次没有生成有效内容，请补充更多项目信息后重试";
+        setGenerateError({
+          type: "empty",
+          message,
+          detail: "AI 没有返回可展示的建议或优化文本，请继续编辑项目背景、你的职责和结果数据。",
+        });
+        showToast(message);
+        trackException("generate_empty_result", "optimize_resume_empty_result", message, "generate", sourceText.trim().length);
+        return;
+      }
+
       setOptimization(result);
       setResumeResults([result, ...resumeResults]);
       trackEvent("resume_optimized", { projectId: activeProject.id, targetRole });
+
+      if (result.formatWarning) {
+        const message = "AI 返回格式异常，已使用可用文本兜底展示";
+        setGenerateError({
+          type: "format",
+          message,
+          detail: "页面没有报错，已保留 AI 返回的可读内容；你也可以重新生成以获得结构化结果。",
+        });
+        trackException("generate_format_error", "optimize_resume_format_warning", message, "generate", sourceText.trim().length);
+      }
+
       showToast("简历优化已完成");
-    } catch {
-      showToast("优化失败，请重试");
+    } catch (error) {
+      const errorMessage = getErrorMessage(error);
+      const message = errorMessage.includes("本次没有生成有效内容")
+        ? "本次没有生成有效内容，请补充更多项目信息后重试"
+        : "生成失败，请检查网络后重试";
+      const type = errorMessage.includes("本次没有生成有效内容") ? "empty" : "failed";
+      setGenerateError({
+        type,
+        message,
+        detail:
+          type === "empty"
+            ? "AI 返回为空，建议补充项目背景、你的职责、结果数据后再试。"
+            : "网络或 AI 服务暂时不可用，你的输入和当前结果已保留，可以重新生成。",
+      });
+      showToast(message);
+      trackException(
+        type === "empty" ? "generate_empty_result" : "generate_failed",
+        type === "empty" ? "optimize_resume_empty_response" : "optimize_resume_request_failed",
+        errorMessage,
+        "generate",
+        sourceText.trim().length,
+      );
     } finally {
       setIsOptimizing(false);
     }
@@ -317,8 +485,10 @@ export function ProjectEditor() {
       await navigator.clipboard.writeText(relatedOptimization.optimizedContent);
       trackEvent("result_copied", { source: "project_detail_resume", resultId: relatedOptimization.id });
       showToast("已复制到剪贴板");
-    } catch {
-      showToast("复制失败，请手动复制");
+    } catch (error) {
+      const message = "复制失败，请手动选择文本复制";
+      showToast(message);
+      trackException("copy_failed", "optimized_content_copy_failed", getErrorMessage(error), "copy", sourceText.trim().length);
     } finally {
       setIsCopyingOptimized(false);
     }
@@ -472,11 +642,27 @@ export function ProjectEditor() {
               </label>
               <div>
                 <label className="mb-2 block text-sm font-semibold">粘贴项目资料</label>
-                <Textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} rows={5} placeholder="请粘贴项目介绍、PRD、简历项目经历或面试准备资料" />
+                <Textarea
+                  value={sourceText}
+                  onChange={(event) => updateSourceText(event.target.value)}
+                  rows={5}
+                  maxLength={sourceTextMaxLength}
+                  aria-invalid={Boolean(sourceTextError)}
+                  placeholder="请粘贴项目介绍、PRD、简历项目经历或面试准备资料"
+                  className={sourceTextError ? "border-red-400 bg-red-50" : ""}
+                />
+                <div className="mt-2 flex flex-col gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <span className={sourceTextError ? "text-red-600" : "text-[var(--text-subtle)]"}>
+                    {sourceTextError || `最多 ${sourceTextMaxLength} 字，当前 ${sourceText.length} 字`}
+                  </span>
+                  <span className={sourceText.length >= sourceTextMaxLength ? "text-red-600" : "text-[var(--text-subtle)]"}>
+                    {sourceText.length}/{sourceTextMaxLength}
+                  </span>
+                </div>
                 <div className="mt-3 flex justify-end">
                   <Button onClick={identifyFromText} disabled={isRecognizing}>
                     <FileText size={16} />
-                    {isRecognizing ? "识别中..." : "开始AI识别"}
+                    {isRecognizing ? "生成中..." : "开始AI识别"}
                   </Button>
                 </div>
               </div>
@@ -489,21 +675,50 @@ export function ProjectEditor() {
         <section id="项目原始内容" className="mb-8 rounded border border-[var(--border)] bg-white p-6">
           <h2 className="text-xl font-semibold">项目信息编辑</h2>
           <p className="mt-2 rounded border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">当前模式：{modeLabel}</p>
+          {aiMissingFields.length ? (
+            <div className="mt-3 rounded border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+              <p className="font-medium">AI已完成初步整理，部分字段建议补充完善</p>
+              <p className="mt-1">检测到 {aiMissingFields.length} 个字段待补充：{aiMissingFields.map((field) => field.label).join("、")}</p>
+            </div>
+          ) : null}
           <div className="mb-6 mt-5">
-            <Input value={draft.name} onChange={(event) => updateField("name", event.target.value)} placeholder="项目名称" className="text-2xl font-semibold" />
+            <label className="mb-2 block text-sm font-semibold">
+              项目名称 {missingAiFieldKeys.has("name") ? <span className="text-yellow-700">⚠ 待补充</span> : null}
+            </label>
+            <Input
+              value={draft.name}
+              onChange={(event) => updateField("name", event.target.value)}
+              placeholder="项目名称"
+              className={`text-2xl font-semibold ${missingAiFieldKeys.has("name") ? "border-yellow-300 bg-yellow-50" : ""}`}
+            />
           </div>
           <div className="space-y-6">
             {sections.map((section) => (
               <div key={section.id} id={section.id}>
-                <label className="mb-2 block text-sm font-semibold">{section.label}</label>
-                <Textarea rows={section.key === "review" ? 5 : 3} value={draft[section.key]} onChange={(event) => updateField(section.key, event.target.value)} placeholder={section.placeholder} />
+                <label className="mb-2 block text-sm font-semibold">
+                  {section.label} {missingAiFieldKeys.has(section.key) ? <span className="text-yellow-700">⚠ 待补充</span> : null}
+                </label>
+                <Textarea
+                  rows={section.key === "review" ? 5 : 3}
+                  value={draft[section.key]}
+                  onChange={(event) => updateField(section.key, event.target.value)}
+                  placeholder={section.placeholder}
+                  className={missingAiFieldKeys.has(section.key) ? "border-yellow-300 bg-yellow-50" : ""}
+                />
               </div>
             ))}
           </div>
-          <div className="mt-6 flex justify-end">
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {saveError ? (
+              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {saveError}
+              </div>
+            ) : (
+              <span />
+            )}
             <Button onClick={saveProject} disabled={isSaving}>
               <Save size={16} />
-              {isSaving ? "保存中..." : "保存项目"}
+              {isSaving ? "保存中..." : saveError ? "重新保存" : "保存项目"}
             </Button>
           </div>
         </section>
@@ -560,10 +775,32 @@ export function ProjectEditor() {
               </Select>
               <Button onClick={startOptimization} disabled={isOptimizing}>
                 <SendHorizontal size={16} />
-                {isOptimizing ? "优化中..." : "开始优化"}
+                {isOptimizing ? "生成中..." : "开始优化"}
               </Button>
             </div>
           </div>
+          {generateError ? (
+            <div className="mb-4 rounded border border-red-200 bg-red-50 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-600" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold text-red-700">{generateError.message}</h3>
+                  <p className="mt-1 text-sm leading-6 text-red-700">{generateError.detail}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {generateError.type === "empty" ? (
+                      <Button variant="secondary" onClick={() => document.getElementById("项目原始内容")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                        继续编辑
+                      </Button>
+                    ) : null}
+                    <Button onClick={startOptimization} disabled={isOptimizing}>
+                      <RefreshCw size={15} />
+                      重新生成
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {relatedOptimization ? (
             <div className="grid gap-3 md:grid-cols-2">
               {relatedOptimization.suggestions.map((suggestion) => (

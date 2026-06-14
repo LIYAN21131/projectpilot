@@ -9,6 +9,10 @@ type AIResumeResponse = {
   optimizedContent: string;
 };
 
+type FallbackResumeResponse = AIResumeResponse & {
+  formatWarning?: boolean;
+};
+
 function buildPrompt(project: Project, targetRole: string, ruleAnalysis: unknown) {
   return `
 你是中文实习求职简历优化助手。请基于用户项目经历，生成适合中文实习简历表达的优化建议和优化版项目经历。
@@ -55,7 +59,7 @@ ${JSON.stringify(
 }
 
 function normalizeAIResult(
-  result: AIResumeResponse,
+  result: FallbackResumeResponse,
   project: Project,
   targetRole: string,
 ): ResumeOptimizationResult {
@@ -63,9 +67,33 @@ function normalizeAIResult(
     id: crypto.randomUUID(),
     projectId: project.id,
     targetRole,
-    suggestions: Array.isArray(result.suggestions) ? result.suggestions : [],
+    suggestions: Array.isArray(result.suggestions) ? result.suggestions.filter(Boolean) : [],
     optimizedContent: result.optimizedContent || "",
     createdAt: new Date().toISOString(),
+    ...(result.formatWarning ? { formatWarning: true } : {}),
+  };
+}
+
+function normalizeAIContent(content: string): FallbackResumeResponse {
+  try {
+    const parsed = JSON.parse(content) as Partial<AIResumeResponse>;
+    const suggestions = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+      : [];
+    const optimizedContent = typeof parsed.optimizedContent === "string" ? parsed.optimizedContent.trim() : "";
+
+    if (suggestions.length || optimizedContent) {
+      return { suggestions, optimizedContent };
+    }
+  } catch {
+    // Fall through to text fallback below.
+  }
+
+  const fallbackText = content.trim();
+  return {
+    suggestions: fallbackText ? ["AI 返回格式异常，已为你保留可用文本。"] : [],
+    optimizedContent: fallbackText,
+    formatWarning: true,
   };
 }
 
@@ -108,17 +136,16 @@ export async function POST(request: Request) {
     });
 
     const content = completion.choices[0]?.message?.content;
-    if (!content) {
-      return NextResponse.json(optimizeResume(project, targetRole));
+    if (!content?.trim()) {
+      return NextResponse.json(
+        { error: "本次没有生成有效内容" },
+        { status: 502 },
+      );
     }
 
-    const parsed = JSON.parse(content) as AIResumeResponse;
+    const parsed = normalizeAIContent(content);
     return NextResponse.json(normalizeAIResult(parsed, project, targetRole));
   } catch (error) {
-    if (project) {
-      return NextResponse.json(optimizeResume(project, targetRole));
-    }
-
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Unknown error",

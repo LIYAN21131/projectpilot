@@ -15,10 +15,31 @@ async function postAI<T>(url: string, body: unknown): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`AI request failed: ${response.status}`);
+    let message = `AI request failed: ${response.status}`;
+    try {
+      const errorBody = (await response.json()) as { error?: string };
+      message = errorBody.error || message;
+    } catch {
+      // Keep the status-based message when the response body cannot be parsed.
+    }
+    throw new Error(message);
   }
 
-  return response.json() as Promise<T>;
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error("AI response parse failed");
+  }
+}
+
+export async function optimizeResumeWithAIOrThrow(
+  project: Project,
+  targetRole: string,
+): Promise<ResumeOptimizationResult> {
+  return postAI<ResumeOptimizationResult>("/api/ai/optimize-resume", {
+    project,
+    targetRole,
+  });
 }
 
 export async function optimizeResumeWithAI(

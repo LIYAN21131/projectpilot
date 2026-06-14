@@ -4,5 +4,6 @@ export type ResumeOptimizationResult = {
   targetRole: string;
   suggestions: string[];
   optimizedContent: string;
+  formatWarning?: boolean;
   createdAt: string;
 };

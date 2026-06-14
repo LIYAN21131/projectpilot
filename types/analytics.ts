@@ -4,7 +4,15 @@ export type AnalyticsEventName =
   | "project_deleted"
   | "resume_optimized"
   | "interview_generated"
-  | "result_copied";
+  | "result_copied"
+  | "input_empty_error"
+  | "input_too_short_error"
+  | "generate_failed"
+  | "generate_empty_result"
+  | "generate_format_error"
+  | "copy_failed"
+  | "save_failed"
+  | "page_error";
 
 export type AnalyticsEvent = {
   name: AnalyticsEventName;

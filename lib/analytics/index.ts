@@ -14,7 +14,11 @@ export function trackEvent(
     timestamp: new Date().toISOString(),
   };
 
-  const raw = window.localStorage.getItem(ANALYTICS_KEY);
-  const events: AnalyticsEvent[] = raw ? JSON.parse(raw) : [];
-  window.localStorage.setItem(ANALYTICS_KEY, JSON.stringify([event, ...events]));
+  try {
+    const raw = window.localStorage.getItem(ANALYTICS_KEY);
+    const events: AnalyticsEvent[] = raw ? JSON.parse(raw) : [];
+    window.localStorage.setItem(ANALYTICS_KEY, JSON.stringify([event, ...events]));
+  } catch {
+    // Analytics must never block the user's recovery path.
+  }
 }
