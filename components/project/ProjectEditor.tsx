@@ -1,29 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, Clipboard, FileText, RefreshCw, Save, SendHorizontal, Upload } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Clipboard, RotateCcw, Save, SendHorizontal, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Input, Select, Textarea } from "@/components/common/Field";
 import { Toast } from "@/components/common/Toast";
-import { optimizeResumeWithAIOrThrow } from "@/lib/ai/client";
-import { formatProjectMetrics } from "@/lib/ai/extractProjectMetrics";
-import {
-  checkProjectMissingFields,
-  identifyProjectType,
-  suggestProjectMetrics,
-} from "@/lib/ai/rules/projectRules";
-import { trackEvent } from "@/lib/analytics";
-import { targetRoles } from "@/lib/mock/projects";
-import { mapStructuredResultToProject, parseStructuredProject } from "@/lib/project/structuredProjectParser";
+import { optimizeResumeBulletsWithAI, prepareInterviewWithAI } from "@/lib/ai/client";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
-import type { Project } from "@/types/project";
-import type { ResumeOptimizationResult } from "@/types/resume";
+import type {
+  InterviewPreparationItem,
+  Project,
+  ProjectEditorState,
+  RecognizedProjectFields,
+  RecognitionStatus,
+  ResumeProjectFields,
+} from "@/types/project";
+
+const PROJECTS_KEY = "projectpilot.projects";
+const AUTO_SAVE_DELAY = 800;
 
 const emptyProject = (): Project => ({
   id: crypto.randomUUID(),
   name: "",
+  summary: "",
   background: "",
   targetUsers: "",
   painPoints: "",
@@ -31,824 +32,1270 @@ const emptyProject = (): Project => ({
   responsibilities: "",
   results: "",
   metrics: "",
+  tools: "",
   review: "",
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
 
-const sections = [
-  { id: "background", label: "项目背景", key: "background", placeholder: "描述项目初衷、业务场景、团队环境和外部约束。" },
-  { id: "pain-points", label: "用户痛点", key: "painPoints", placeholder: "描述旧流程、旧产品或目标用户遇到的关键问题。" },
-  { id: "target-users", label: "目标用户", key: "targetUsers", placeholder: "描述项目服务的人群、使用场景和核心诉求。" },
-  { id: "solutions", label: "解决方案", key: "solution", placeholder: "描述你的产品方案、功能设计、流程优化或策略选择。" },
-  { id: "responsibilities", label: "个人职责", key: "responsibilities", placeholder: "描述你承担的角色、推进动作和协作边界。" },
-  { id: "results", label: "项目成果", key: "results", placeholder: "描述交付成果、业务反馈、上线结果或用户变化。" },
-  { id: "metrics", label: "数据指标", key: "metrics", placeholder: "列出转化率、留存率、效率、完成率、使用人数等可量化指标。" },
-  { id: "review", label: "项目复盘", key: "review", placeholder: "记录关键决策、经验教训和面试中可展开的亮点。" },
-] as const;
-
-const unrecognizedContent = "未识别到内容";
-
-const sourceTextMaxLength = 5000;
-const sourceTextMinLength = 30;
-const aiCoreFields: Array<keyof Project> = ["background", "painPoints", "solution", "responsibilities", "metrics"];
-const aiFillableFields: Array<{ key: keyof Project; label: string }> = [
-  { key: "name", label: "项目名称" },
-  { key: "background", label: "项目背景" },
-  { key: "painPoints", label: "用户痛点" },
-  { key: "targetUsers", label: "目标用户" },
-  { key: "solution", label: "解决方案" },
-  { key: "responsibilities", label: "个人职责" },
-  { key: "results", label: "项目成果" },
-  { key: "metrics", label: "数据指标" },
+const targetRoleOptions = ["产品经理", "产品运营", "数据分析", "UI设计", "开发工程师"];
+const statusOptions = ["待完善", "已整理", "待优化"];
+const targetUsersBlockedKeywords = [
+  "产品流程",
+  "核心流程",
+  "用户输入",
+  "AI自动提炼",
+  "AI 自动提炼",
+  "AI自动",
+  "AI 自动",
+  "STAR",
+  "生成面试回答",
+  "生成",
+  "复制",
+  "保存",
+  "PostHog",
+  "数据埋点",
+  "埋点",
+  "转化漏斗",
+  "漏斗",
+  "验证产品",
+  "后续优化方向",
+  "后续优化",
+  "行业场景",
+  "回答真实性",
+  "项目亮点",
+  "工具",
+  "功能",
+  "方案",
+  "设计一款",
+  "完成",
+  "支持",
+  "监测",
+  "优化",
 ];
 
-type ExceptionEventName =
-  | "input_empty_error"
-  | "input_too_short_error"
-  | "generate_failed"
-  | "generate_empty_result"
-  | "generate_format_error"
-  | "copy_failed"
-  | "save_failed";
+const sectionDefinitions = [
+  { id: "material-import", label: "资料导入" },
+  { id: "project-info", label: "项目资料" },
+  { id: "resume-optimization", label: "简历优化" },
+  { id: "interview-preparation", label: "面试准备" },
+] as const;
 
-type GenerateErrorState = {
-  type: "failed" | "empty" | "format";
-  message: string;
-  detail: string;
-};
+type SectionId = (typeof sectionDefinitions)[number]["id"];
+type SaveState = "idle" | "saving" | "saved" | "error";
 
-function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
+type RecognizedProject = RecognizedProjectFields;
+
+type ResumeOptimizeState = "idle" | "loading" | "success" | "error";
+type InterviewPrepareState = "idle" | "loading" | "success" | "error";
+type CopyState = "idle" | "success" | "error";
+type ResumeSaveState = "idle" | "saved";
+type InterviewSaveState = "idle" | "saved";
+
+function normalizeSectionId(value?: string): SectionId {
+  if (value === "raw-material") return "material-import";
+  if (value === "basic-info" || value === "structured-content" || value === "save-status") return "project-info";
+  if (value === "future-flow") return "resume-optimization";
+  return sectionDefinitions.some((section) => section.id === value)
+    ? (value as SectionId)
+    : "material-import";
 }
 
-function hasUsableProjectContent(project: Project) {
-  return [
-    project.name,
-    project.background,
-    project.targetUsers,
-    project.painPoints,
-    project.solution,
-    project.responsibilities,
-    project.results,
-    project.metrics,
-    project.review,
-  ].some((value) => value.trim() && value.trim() !== unrecognizedContent);
+function safeReadProjects() {
+  try {
+    const raw = window.localStorage.getItem(PROJECTS_KEY);
+    return { ok: true, projects: raw ? (JSON.parse(raw) as Project[]) : [] };
+  } catch {
+    return { ok: false, projects: [] as Project[] };
+  }
 }
 
-function hasUsableOptimization(result?: ResumeOptimizationResult) {
-  return Boolean(result?.optimizedContent?.trim() || result?.suggestions?.some((item) => item.trim()));
+function safeWriteProjects(projects: Project[]) {
+  try {
+    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function hasRecognizedCoreField(project: Project) {
-  return aiCoreFields.some((key) => project[key].trim());
+function getProjectStatus(project: Project) {
+  if (project.editorState?.status) return project.editorState.status;
+
+  if (!project.name.trim() || !project.background.trim() || !project.responsibilities.trim()) {
+    return "待完善";
+  }
+
+  if (!project.results.trim() || !project.review.trim()) {
+    return "待优化";
+  }
+
+  return "已整理";
 }
 
-function getMissingAiFields(project: Project) {
-  return aiFillableFields.filter((field) => !project[field.key].trim());
-}
-
-function parseProjectFromSource(source: string) {
-  const base = emptyProject();
-  const text = source.trim();
-  const { result, validation } = parseStructuredProject(text);
-  const extractedProject = mapStructuredResultToProject(result, base);
-
-  return {
-    project: {
-      ...extractedProject,
-      metrics: extractedProject.metrics || formatProjectMetrics(extractedProject, text),
-    },
-    validation,
-  };
-}
-
-function originalResume(project: Project) {
-  return `项目名称：${project.name}
-项目背景：${project.background || "待补充"}
-目标用户：${project.targetUsers || "待补充"}
-用户痛点：${project.painPoints || "待补充"}
-解决方案：${project.solution || "待补充"}
-个人职责：${project.responsibilities || "待补充"}
-项目成果：${project.results || "待补充"}
-数据指标：${project.metrics || "待补充"}`;
-}
-
-function formatSavedTime(value: string) {
+function formatTime(value?: string) {
+  if (!value) return "尚未保存";
   return new Date(value).toLocaleString();
 }
 
-function projectCardTitle(project: Project) {
-  const name = project.name.trim();
-  return name && name !== unrecognizedContent ? name : "未命名项目";
+function formatShortTime(value?: string) {
+  if (!value) return "";
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function projectCardBackground(project: Project) {
-  const background = project.background.trim();
-  return background && background !== unrecognizedContent ? background : "暂未填写项目背景";
+function buildRawMaterial(project: Project) {
+  return [
+    project.summary && `项目简介：${project.summary}`,
+    project.background && `项目背景：${project.background}`,
+    project.targetUsers && `目标用户：${project.targetUsers}`,
+    project.painPoints && `用户痛点：${project.painPoints}`,
+    project.responsibilities && `我的职责：${project.responsibilities}`,
+    project.solution && `解决方案：${project.solution}`,
+    project.results && `数据结果：${project.results}`,
+    project.metrics && `数据指标：${project.metrics}`,
+    project.tools && `使用工具：${project.tools}`,
+    project.review && `项目复盘：${project.review}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
-export function ProjectEditor() {
-  const {
-    hydrated,
-    projects,
-    setProjects,
-    resumeResults,
-    setResumeResults,
-    interviewPreparations,
-    setInterviewPreparations,
-    setInterviewQuestions,
-  } = useProjectPilotStore();
-  const [selectedId, setSelectedId] = useState("");
-  const [creationMode, setCreationMode] = useState<"ai" | "manual">("ai");
+function hasProjectInfo(project: Project) {
+  return [
+    project.name,
+    project.summary,
+    project.background,
+    project.targetUsers,
+    project.painPoints,
+    project.responsibilities,
+    project.solution,
+    project.results,
+    project.metrics,
+    project.tools,
+    project.review,
+  ].some((value) => value?.trim());
+}
+
+function resumeFieldsFromProject(project: Project): ResumeProjectFields {
+  if (project.confirmedProjectFields) {
+    return {
+      projectName: project.confirmedProjectFields.projectName,
+      background: project.confirmedProjectFields.background,
+      painPoint: project.confirmedProjectFields.painPoint,
+      responsibility: project.confirmedProjectFields.responsibility,
+      actions: project.confirmedProjectFields.actions,
+      result: project.confirmedProjectFields.result,
+      metrics: project.confirmedProjectFields.metrics,
+      tools: project.confirmedProjectFields.tools.join("、"),
+    };
+  }
+
+  return {
+    projectName: project.name || "",
+    background: project.background || project.summary || "",
+    painPoint: project.painPoints || "",
+    responsibility: project.responsibilities || "",
+    actions: project.solution || "",
+    result: project.results || "",
+    metrics: project.metrics || "",
+    tools: project.tools || "",
+  };
+}
+
+function confirmedFieldsFromProject(project: Project) {
+  return {
+    projectName: project.name || "",
+    projectSummary: project.summary || "",
+    background: project.background || "",
+    targetUsers: project.targetUsers || "",
+    painPoint: project.painPoints || "",
+    responsibility: project.responsibilities || "",
+    actions: project.solution || "",
+    result: project.results || "",
+    metrics: project.metrics || "",
+    tools: project.tools
+      ? project.tools.split(/[、,，]/).map((item) => item.trim()).filter(Boolean)
+      : [],
+    reflection: project.review || "",
+  };
+}
+
+function cleanBulletText(value: string) {
+  return value.replace(/^[-•\d.、\s]+/, "").trim();
+}
+
+function fieldPlaceholder() {
+  return "未识别到，请手动补充";
+}
+
+function fillIfEmpty(current: string, next: string) {
+  return current.trim() ? current : next;
+}
+
+function sanitizeTargetUsers(value: string) {
+  const text = value.trim();
+  if (!text) return "";
+  return targetUsersBlockedKeywords.some((keyword) => text.includes(keyword)) ? "" : text;
+}
+
+function sanitizeProjectTargetUsers(project: Project) {
+  const targetUsers = sanitizeTargetUsers(project.targetUsers || "");
+  if (targetUsers === project.targetUsers) return project;
+  return { ...project, targetUsers };
+}
+
+function getInitialRecognitionStatus(project: Project): RecognitionStatus {
+  if (project.editorState?.recognitionStatus) return project.editorState.recognitionStatus;
+  return hasProjectInfo(project) ? "confirmed" : "idle";
+}
+
+export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: string }) {
+  const { hydrated, projects, setProjects, profile, setProfile } = useProjectPilotStore();
   const [draft, setDraft] = useState<Project>(emptyProject());
-  const [sourceText, setSourceText] = useState("");
-  const [targetRole, setTargetRole] = useState("产品经理");
-  const [optimization, setOptimization] = useState<ResumeOptimizationResult | undefined>();
-  const [isRecognizing, setIsRecognizing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [isCopyingOptimized, setIsCopyingOptimized] = useState(false);
-  const [deletingProjectIds, setDeletingProjectIds] = useState<Set<string>>(new Set());
+  const [targetRole, setTargetRole] = useState(profile.targetRole || "产品经理");
+  const [projectStatus, setProjectStatus] = useState("待完善");
+  const [rawMaterial, setRawMaterial] = useState("");
+  const [activeSection, setActiveSection] = useState<SectionId>("material-import");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState("");
   const [toastMessage, setToastMessage] = useState("");
-  const [sourceTextError, setSourceTextError] = useState("");
-  const [generateError, setGenerateError] = useState<GenerateErrorState | undefined>();
-  const [saveError, setSaveError] = useState("");
-  const [aiMissingFields, setAiMissingFields] = useState<Array<{ key: keyof Project; label: string }>>([]);
+  const [restoreMessage, setRestoreMessage] = useState("");
+  const [readError, setReadError] = useState(false);
+  const [isRecognizing, setIsRecognizing] = useState(false);
+  const [recognitionStatus, setRecognitionStatus] = useState<RecognitionStatus>("idle");
+  const [recognitionConfirmedAt, setRecognitionConfirmedAt] = useState("");
+  const [lastRecognizedAt, setLastRecognizedAt] = useState("");
+  const [resumeBullets, setResumeBullets] = useState<string[]>([]);
+  const [resumeOptimizeState, setResumeOptimizeState] = useState<ResumeOptimizeState>("idle");
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const [resumeSaveState, setResumeSaveState] = useState<ResumeSaveState>("idle");
+  const [interviewItems, setInterviewItems] = useState<InterviewPreparationItem[]>([]);
+  const [interviewPrepareState, setInterviewPrepareState] = useState<InterviewPrepareState>("idle");
+  const [copiedScriptIndex, setCopiedScriptIndex] = useState<number | null>(null);
+  const [copyScriptErrorIndex, setCopyScriptErrorIndex] = useState<number | null>(null);
+  const [interviewSaveState, setInterviewSaveState] = useState<InterviewSaveState>("idle");
+  const initializedRef = useRef(false);
+  const userEditedRef = useRef(false);
+  const loadedProjectIdRef = useRef("");
+  const programmaticScrollRef = useRef(false);
+  const restoreDoneRef = useRef(false);
+  const userScrolledRef = useRef(false);
+  const programmaticScrollTimerRef = useRef<number | undefined>(undefined);
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedId),
-    [projects, selectedId],
+  const savedProject = useMemo(
+    () => projects.find((project) => project.id === initialProjectId),
+    [initialProjectId, projects],
   );
-  const activeProject = selectedProject ?? draft;
-  const relatedOptimization = optimization ?? resumeResults.find((result) => result.projectId === activeProject.id);
-  const projectTypeResult = identifyProjectType(activeProject);
-  const missingFieldsResult = checkProjectMissingFields(activeProject);
-  const suggestedMetricsResult = suggestProjectMetrics(projectTypeResult.projectType);
-  const isEditingProject = Boolean(selectedProject);
-  const formTitle = isEditingProject ? `编辑项目：${activeProject.name || "未命名项目"}` : "新建项目";
-  const modeLabel = isEditingProject ? "编辑项目" : "新建项目";
-  const missingAiFieldKeys = useMemo(
-    () => new Set(aiMissingFields.map((field) => field.key)),
-    [aiMissingFields],
-  );
+  const isExistingProject = Boolean(savedProject);
+  const hasRawMaterial = Boolean(rawMaterial.trim());
+  const hasFilledProjectInfo = hasProjectInfo(draft);
+  const isRecognitionPending = recognitionStatus === "pendingConfirm";
+  const isNextFlowUnlocked = hasFilledProjectInfo && recognitionStatus !== "pendingConfirm" && recognitionStatus !== "recognizing";
+  const saveStatusText = restoreMessage
+    || (saveState === "saving"
+      ? "正在保存..."
+      : saveState === "error"
+        ? "保存失败，请检查浏览器存储权限"
+        : saveState === "saved"
+          ? `已自动保存${lastSavedAt ? ` ${formatShortTime(lastSavedAt)}` : ""}`
+          : "尚未保存");
 
-  function createNew(mode: "ai" | "manual") {
-    setCreationMode(mode);
-    setSelectedId("");
-    setDraft(emptyProject());
-    setOptimization(undefined);
-    setSourceTextError("");
-    setGenerateError(undefined);
-    setSaveError("");
-    setAiMissingFields([]);
-  }
+  const visibleSections = useMemo(() => {
+    return sectionDefinitions.filter((section) => {
+      if (section.id === "material-import") return true;
+      if (section.id === "project-info") return hasRawMaterial;
+      if (section.id === "resume-optimization") return isNextFlowUnlocked;
+      if (section.id === "interview-preparation") return isNextFlowUnlocked;
+      return false;
+    });
+  }, [hasRawMaterial, isNextFlowUnlocked]);
 
-  function startNewProject() {
-    createNew("ai");
-    window.setTimeout(() => document.getElementById("创建方式")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-  }
+  const scrollToSection = useCallback((id: SectionId) => {
+    programmaticScrollRef.current = true;
+    if (programmaticScrollTimerRef.current) window.clearTimeout(programmaticScrollTimerRef.current);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setActiveSection(id);
+    programmaticScrollTimerRef.current = window.setTimeout(() => {
+      programmaticScrollRef.current = false;
+    }, 900);
+  }, []);
 
-  function selectProject(project: Project) {
-    setSelectedId(project.id);
-    setDraft(project);
-    setOptimization(resumeResults.find((result) => result.projectId === project.id));
-    setGenerateError(undefined);
-    setSaveError("");
-    setAiMissingFields([]);
-    window.setTimeout(() => document.getElementById("创建方式")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-  }
+  useEffect(() => {
+    if (visibleSections.some((section) => section.id === activeSection)) return;
+    const fallbackSection = visibleSections.some((section) => section.id === "project-info")
+      ? "project-info"
+      : "material-import";
+    const timer = window.setTimeout(() => setActiveSection(fallbackSection), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeSection, visibleSections]);
 
-  function updateField(key: keyof Project, value: string) {
-    if (saveError) setSaveError("");
-    if (aiMissingFields.some((field) => field.key === key) && value.trim()) {
-      setAiMissingFields((current) => current.filter((field) => field.key !== key));
+  const persistProject = useCallback((
+    hasUnsavedDraft: boolean,
+    editorStateOverrides: Partial<ProjectEditorState> = {},
+    projectOverrides: Partial<Project> = {},
+  ) => {
+    const now = new Date().toISOString();
+    const normalized: Project = {
+      ...draft,
+      ...projectOverrides,
+      name: draft.name.trim() || "未命名项目",
+      summary: draft.summary?.trim(),
+      background: draft.background.trim(),
+      updatedAt: now,
+      editorState: {
+        activeSection,
+        scrollY: typeof window === "undefined" ? 0 : window.scrollY,
+        lastSavedAt: now,
+        lastEditedAt: draft.updatedAt || now,
+        hasUnsavedDraft,
+        rawMaterial,
+        targetRole,
+        status: projectStatus,
+        recognitionStatus,
+        recognitionConfirmedAt,
+        lastRecognizedAt,
+        ...editorStateOverrides,
+      },
+    };
+
+    const current = safeReadProjects();
+    if (!current.ok) {
+      setSaveState("error");
+      return false;
     }
+
+    const exists = current.projects.some((project) => project.id === normalized.id);
+    const nextProjects = exists
+      ? current.projects.map((project) => (project.id === normalized.id ? normalized : project))
+      : [normalized, ...current.projects];
+
+    if (!safeWriteProjects(nextProjects)) {
+      setSaveState("error");
+      setToastMessage("当前项目保存失败，已保留页面内容，请稍后重试。");
+      return false;
+    }
+
+    setProjects(nextProjects);
+    setProfile({ ...profile, targetRole });
+    if (!initialProjectId) {
+      window.history.replaceState(null, "", `/projects/edit?projectId=${encodeURIComponent(normalized.id)}`);
+    }
+    setDraft(normalized);
+    setLastSavedAt(now);
+    setSaveState("saved");
+    setRestoreMessage("");
+    return true;
+  }, [
+    activeSection,
+    draft,
+    initialProjectId,
+    lastRecognizedAt,
+    profile,
+    projectStatus,
+    rawMaterial,
+    recognitionConfirmedAt,
+    recognitionStatus,
+    setProfile,
+    setProjects,
+    targetRole,
+  ]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    if (initialProjectId && !savedProject) {
+      const timer = window.setTimeout(() => {
+        setReadError(true);
+        initializedRef.current = true;
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+
+    if (savedProject) {
+      if (loadedProjectIdRef.current === savedProject.id) return;
+
+      const timer = window.setTimeout(() => {
+        const editorState = savedProject.editorState;
+        const restoredSection = normalizeSectionId(editorState?.activeSection);
+        const restoredProject = sanitizeProjectTargetUsers(savedProject);
+        loadedProjectIdRef.current = savedProject.id;
+        setDraft(restoredProject);
+        setRawMaterial(editorState?.rawMaterial ?? buildRawMaterial(restoredProject));
+        setTargetRole(editorState?.targetRole || profile.targetRole || "产品经理");
+        setProjectStatus(editorState?.status || getProjectStatus(restoredProject));
+        setRecognitionStatus(getInitialRecognitionStatus(restoredProject));
+        setRecognitionConfirmedAt(editorState?.recognitionConfirmedAt || "");
+        setLastRecognizedAt(editorState?.lastRecognizedAt || "");
+        setResumeBullets(restoredProject.optimizedResumeBullets ?? []);
+        setResumeOptimizeState(restoredProject.optimizedResumeBullets?.length ? "success" : "idle");
+        setCopyState("idle");
+        setResumeSaveState(restoredProject.optimizedResumeBullets?.length ? "saved" : "idle");
+        setInterviewItems(restoredProject.interviewPreparations ?? []);
+        setInterviewPrepareState(restoredProject.interviewPreparations?.length ? "success" : "idle");
+        setCopiedScriptIndex(null);
+        setCopyScriptErrorIndex(null);
+        setInterviewSaveState(restoredProject.interviewPreparations?.length ? "saved" : "idle");
+        setLastSavedAt(editorState?.lastSavedAt || restoredProject.updatedAt);
+        setSaveState("saved");
+        setReadError(false);
+        initializedRef.current = true;
+
+        if (editorState) {
+          setActiveSection(restoredSection);
+          setRestoreMessage("已恢复上次编辑状态");
+          setToastMessage("已恢复上次编辑状态");
+          window.setTimeout(() => {
+            if (!restoreDoneRef.current && !userScrolledRef.current) {
+              programmaticScrollRef.current = true;
+              window.scrollTo({ top: editorState.scrollY, behavior: "auto" });
+              restoreDoneRef.current = true;
+              window.setTimeout(() => {
+                programmaticScrollRef.current = false;
+              }, 120);
+            }
+            setToastMessage("");
+          }, 100);
+        }
+      }, 0);
+
+      return () => window.clearTimeout(timer);
+    }
+
+    const timer = window.setTimeout(() => {
+      loadedProjectIdRef.current = "";
+      setReadError(false);
+      setLastSavedAt("");
+      setRecognitionStatus("idle");
+      setRecognitionConfirmedAt("");
+      setLastRecognizedAt("");
+      setResumeBullets([]);
+      setResumeOptimizeState("idle");
+      setCopyState("idle");
+      setResumeSaveState("idle");
+      setInterviewItems([]);
+      setInterviewPrepareState("idle");
+      setCopiedScriptIndex(null);
+      setCopyScriptErrorIndex(null);
+      setInterviewSaveState("idle");
+      initializedRef.current = true;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [hydrated, initialProjectId, profile.targetRole, savedProject]);
+
+  useEffect(() => {
+    if (savedProject) return;
+
+    const timer = window.setTimeout(() => setTargetRole(profile.targetRole || "产品经理"), 0);
+    return () => window.clearTimeout(timer);
+  }, [profile.targetRole, savedProject]);
+
+  useEffect(() => {
+    const observers: IntersectionObserver[] = [];
+
+    visibleSections.forEach((section) => {
+      const element = document.getElementById(section.id);
+      if (!element) return;
+
+      const observer = new IntersectionObserver(
+        ([entry]) => {
+          if (!entry.isIntersecting) return;
+          userEditedRef.current = true;
+          setActiveSection(section.id);
+        },
+        { rootMargin: "-30% 0px -55% 0px", threshold: 0.01 },
+      );
+
+      observer.observe(element);
+      observers.push(observer);
+    });
+
+    return () => observers.forEach((observer) => observer.disconnect());
+  }, [visibleSections]);
+
+  useEffect(() => {
+    function handleUserScroll() {
+      if (!programmaticScrollRef.current) {
+        userScrolledRef.current = true;
+      }
+    }
+
+    window.addEventListener("scroll", handleUserScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleUserScroll);
+      if (programmaticScrollTimerRef.current) window.clearTimeout(programmaticScrollTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || !initializedRef.current || !userEditedRef.current || readError) return;
+    if (recognitionStatus === "pendingConfirm") return;
+
+    const timer = window.setTimeout(() => {
+      setSaveState("saving");
+      if (persistProject(false)) userEditedRef.current = false;
+    }, AUTO_SAVE_DELAY);
+
+    return () => window.clearTimeout(timer);
+  }, [activeSection, draft, hydrated, persistProject, projectStatus, rawMaterial, readError, recognitionStatus, targetRole]);
+
+  useEffect(() => {
+    if (!hydrated || readError) return;
+
+    function handleBeforeUnload() {
+      if (initializedRef.current && recognitionStatus !== "pendingConfirm") persistProject(false);
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hydrated, persistProject, readError, recognitionStatus]);
+
+  function markChanged() {
+    userEditedRef.current = true;
+    setSaveState("idle");
+    setRestoreMessage("");
+  }
+
+  function updateDraft(key: keyof Project, value: string) {
+    markChanged();
     setDraft((current) => ({ ...current, [key]: value, updatedAt: new Date().toISOString() }));
   }
 
-  function showToast(message: string) {
-    setToastMessage(message);
-    window.setTimeout(() => setToastMessage(""), 2600);
+  function updateTargetRole(value: string) {
+    markChanged();
+    setTargetRole(value);
   }
 
-  function trackException(
-    name: ExceptionEventName,
-    scenario: string,
-    errorMessage: string,
-    currentStep: string,
-    inputLength = sourceText.trim().length,
-  ) {
-    trackEvent(name, {
-      scenario,
-      input_length: inputLength,
-      error_message: errorMessage.slice(0, 180),
-      current_step: currentStep,
-    });
+  function updateProjectStatus(value: string) {
+    markChanged();
+    setProjectStatus(value);
   }
 
-  function updateSourceText(value: string) {
-    const nextValue = value.slice(0, sourceTextMaxLength);
-    setSourceText(nextValue);
+  function updateRawMaterial(value: string) {
+    markChanged();
+    setRawMaterial(value);
+  }
 
-    if (nextValue.length >= sourceTextMaxLength) {
-      setSourceTextError("已达到字数上限，请精简后再生成");
+  async function recognizeProject() {
+    if (!rawMaterial.trim()) {
+      setToastMessage("请先输入项目资料");
+      window.setTimeout(() => setToastMessage(""), 2400);
       return;
     }
 
-    if (sourceTextError) {
-      setSourceTextError("");
-    }
-  }
-
-  function validateSourceBeforeGenerate() {
-    const inputLength = sourceText.trim().length;
-
-    if (!inputLength) {
-      const message = "请先输入你的项目经历或简历内容";
-      setSourceTextError(message);
-      showToast(message);
-      trackException("input_empty_error", "source_text_empty", message, "input", 0);
-      return false;
-    }
-
-    if (inputLength < sourceTextMinLength) {
-      const message = "内容太少，建议补充项目背景、你的职责、结果数据";
-      setSourceTextError(message);
-      showToast(message);
-      trackException("input_too_short_error", "source_text_too_short", message, "input", inputLength);
-      return false;
-    }
-
-    if (sourceText.length > sourceTextMaxLength) {
-      const message = "已达到字数上限，请精简后再生成";
-      setSourceTextError(message);
-      showToast(message);
-      return false;
-    }
-
-    setSourceTextError("");
-    return true;
-  }
-
-  function applyRecognizedProject(project: Project) {
-    const missingFields = getMissingAiFields(project);
-    setDraft(project);
-    setSelectedId("");
-    setAiMissingFields(missingFields);
-    setSourceTextError("");
-
-    if (missingFields.length) {
-      showToast("AI已完成初步整理，部分字段建议补充完善");
-      return;
-    }
-
-    showToast("识别完成，请确认项目信息");
-  }
-
-  async function handleFile(file?: File) {
-    if (!file) return;
-    let text = "";
-    if (file.type.startsWith("text/") || file.name.endsWith(".txt")) {
-      text = await file.text();
-      updateSourceText(text);
-    }
-    const parsed = parseProjectFromSource(text);
-    if (!hasRecognizedCoreField(parsed.project)) {
-      showToast("未识别到可填充的项目字段，请补充更多项目资料");
-      return;
-    }
-
-    applyRecognizedProject(parsed.project);
-  }
-
-  async function identifyFromText() {
-    const rawProjectContent = sourceText.trim();
-
-    if (!validateSourceBeforeGenerate()) {
-      return;
-    }
-
-    if (isRecognizing) return;
     setIsRecognizing(true);
-    setGenerateError(undefined);
+    setRecognitionStatus("recognizing");
+    setToastMessage("识别中...");
 
     try {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-      const parsed = parseProjectFromSource(rawProjectContent);
+      const response = await fetch("/api/ai/recognize-project", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rawMaterial,
+          currentProject: {
+            projectName: draft.name,
+            projectSummary: draft.summary || "",
+            background: draft.background,
+            targetUsers: draft.targetUsers,
+            painPoint: draft.painPoints,
+            actions: draft.solution,
+            responsibility: draft.responsibilities,
+            result: draft.results,
+            metrics: draft.metrics,
+            tools: draft.tools ? draft.tools.split(/[、,，]/).map((item) => item.trim()).filter(Boolean) : [],
+            reflection: draft.review,
+          },
+        }),
+      });
+      const result = (await response.json()) as { ok: boolean; message?: string; data?: RecognizedProject };
 
-      if (!hasRecognizedCoreField(parsed.project)) {
-        showToast("未识别到可填充的项目字段，请补充更多项目资料");
-        return;
+      if (!response.ok || !result.ok || !result.data) {
+        throw new Error(result.message || "识别失败，请重试");
       }
 
-      applyRecognizedProject(parsed.project);
-    } catch {
-      showToast("识别失败，请重试");
-    } finally {
+      const recognized = result.data;
+      const recognizedAt = new Date().toISOString();
+      setDraft((current) => ({
+        ...current,
+        name: fillIfEmpty(current.name, recognized.projectName),
+        summary: recognized.projectSummary ?? "",
+        background: fillIfEmpty(current.background, recognized.background),
+        targetUsers: recognized.targetUsers ?? "",
+        painPoints: fillIfEmpty(current.painPoints, recognized.painPoint),
+        solution: fillIfEmpty(current.solution, recognized.actions),
+        responsibilities: fillIfEmpty(current.responsibilities, recognized.responsibility),
+        results: fillIfEmpty(current.results, recognized.result),
+        metrics: fillIfEmpty(current.metrics, recognized.metrics),
+        tools: fillIfEmpty(current.tools || "", recognized.tools.join("、")),
+        review: fillIfEmpty(current.review, recognized.reflection),
+        rawProjectText: rawMaterial,
+        recognizedProjectFields: recognized,
+        isProjectFieldsConfirmed: false,
+        originalResumeText: rawMaterial,
+        recognizedResumeFields: {
+          projectName: recognized.projectName,
+          background: recognized.background,
+          painPoint: recognized.painPoint,
+          responsibility: recognized.responsibility,
+          actions: recognized.actions,
+          result: recognized.result,
+          metrics: recognized.metrics,
+          tools: recognized.tools.join("、"),
+        },
+        updatedAt: new Date().toISOString(),
+      }));
+      setRecognitionStatus("pendingConfirm");
+      setLastRecognizedAt(recognizedAt);
+      setRecognitionConfirmedAt("");
+      userEditedRef.current = true;
+      setSaveState("idle");
       setIsRecognizing(false);
+      setToastMessage("AI 已识别项目资料，请检查内容，确认无误后点击“确认保存识别结果”。");
+      scrollToSection("project-info");
+      window.setTimeout(() => setToastMessage(""), 3600);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : "识别失败，请重试";
+      setIsRecognizing(false);
+      setRecognitionStatus("error");
+      setToastMessage(message);
+      window.setTimeout(() => setToastMessage(""), 3600);
     }
   }
 
-  async function saveProject() {
-    if (isSaving) return;
-
-    if (!hasUsableProjectContent(draft)) {
-      const message = "请先生成内容后再保存";
-      setSaveError(message);
-      showToast(message);
-      trackException("save_failed", "save_without_generated_content", message, "save", sourceText.trim().length);
+  function saveProject() {
+    if (saveState === "saving") return;
+    if (recognitionStatus === "pendingConfirm") {
+      setToastMessage("请先确认识别内容");
+      window.setTimeout(() => setToastMessage(""), 2400);
       return;
     }
 
-    setIsSaving(true);
-    setSaveError("");
+    setSaveState("saving");
 
-    try {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-      const isNew = !projects.some((project) => project.id === draft.id);
-      const normalized = {
-        ...draft,
-        name: draft.name.trim() || "未命名项目",
-        updatedAt: new Date().toISOString(),
-      };
-      setProjects(isNew ? [normalized, ...projects] : projects.map((project) => (project.id === normalized.id ? normalized : project)));
-      setDraft(normalized);
-      setSelectedId(normalized.id);
-      trackEvent(isNew ? "project_created" : "project_updated", { projectId: normalized.id });
-      showToast(isNew ? "项目已保存到项目列表" : "项目修改已保存");
-      window.setTimeout(() => document.getElementById(`project-card-${normalized.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 0);
-    } catch (error) {
-      const message = "保存失败，请稍后重试";
-      setSaveError(message);
-      showToast(message);
-      trackException("save_failed", "project_save_failed", getErrorMessage(error), "save", sourceText.trim().length);
-    } finally {
-      setIsSaving(false);
+    if (persistProject(false)) {
+      userEditedRef.current = false;
+      setToastMessage("项目已保存");
+      window.setTimeout(() => setToastMessage(""), 2400);
     }
   }
 
-  async function deleteProjectById(projectId: string) {
-    if (deletingProjectIds.has(projectId)) return;
-    setDeletingProjectIds((current) => new Set(current).add(projectId));
+  function confirmRecognitionResult() {
+    if (saveState === "saving") return;
+
+    const confirmedAt = new Date().toISOString();
+    const sanitizedDraft = { ...draft, targetUsers: sanitizeTargetUsers(draft.targetUsers) };
+    const confirmedFields = resumeFieldsFromProject(sanitizedDraft);
+    const confirmedProjectFields = confirmedFieldsFromProject(sanitizedDraft);
+    setRecognitionStatus("confirmed");
+    setRecognitionConfirmedAt(confirmedAt);
+    setSaveState("saving");
+
+    if (persistProject(
+      false,
+      { recognitionStatus: "confirmed", recognitionConfirmedAt: confirmedAt },
+      {
+        targetUsers: sanitizedDraft.targetUsers,
+        rawProjectText: rawMaterial,
+        confirmedProjectFields,
+        isProjectFieldsConfirmed: true,
+        originalResumeText: rawMaterial,
+        confirmedResumeFields: confirmedFields,
+        recognizedResumeFields: draft.recognizedResumeFields ?? confirmedFields,
+      },
+    )) {
+      userEditedRef.current = false;
+      setToastMessage("识别结果已确认保存，可以继续进行简历优化和面试准备。");
+      window.setTimeout(() => setToastMessage(""), 3000);
+    }
+  }
+
+  async function optimizeResumeBullets() {
+    if (resumeOptimizeState === "loading") return;
+
+    if (!rawMaterial.trim() && !hasProjectInfo(draft)) {
+      setToastMessage("请先输入项目经历内容");
+      window.setTimeout(() => setToastMessage(""), 2400);
+      return;
+    }
+
+    if (recognitionStatus === "pendingConfirm") {
+      setToastMessage("请先确认识别内容");
+      window.setTimeout(() => setToastMessage(""), 2400);
+      return;
+    }
+
+    const fields = resumeFieldsFromProject(draft);
+    setResumeOptimizeState("loading");
 
     try {
-      await new Promise((resolve) => window.setTimeout(resolve, 0));
-      setProjects(projects.filter((project) => project.id !== projectId));
-      setResumeResults(resumeResults.filter((result) => result.projectId !== projectId));
-      setInterviewPreparations(interviewPreparations.filter((item) => item.projectId !== projectId));
-      if (selectedId === projectId) {
-        setInterviewQuestions([]);
-        createNew("manual");
+      const response = await optimizeResumeBulletsWithAI(fields);
+      const bullets = response.bullets.map((item) => item.trim()).filter(Boolean).slice(0, 5);
+      if (!bullets.length) {
+        throw new Error("empty");
       }
-      trackEvent("project_deleted", { projectId });
-      showToast("项目已删除");
+      setResumeBullets(bullets);
+      setResumeOptimizeState("success");
+      setResumeSaveState("idle");
+      setCopyState("idle");
+      setToastMessage("优化完成");
+      window.setTimeout(() => setToastMessage(""), 2400);
     } catch {
-      showToast("删除失败，请重试");
-    } finally {
-      setDeletingProjectIds((current) => {
-        const next = new Set(current);
-        next.delete(projectId);
-        return next;
-      });
+      setResumeOptimizeState("error");
+      setToastMessage("网络或模型服务异常，请稍后重试");
+      window.setTimeout(() => setToastMessage(""), 2600);
     }
   }
 
-  async function startOptimization() {
-    if (isOptimizing) return;
-    setIsOptimizing(true);
-    setGenerateError(undefined);
+  async function copyResumeBullets() {
+    if (!resumeBullets.length) return;
 
     try {
-      const result = await optimizeResumeWithAIOrThrow(activeProject, targetRole);
-
-      if (!hasUsableOptimization(result)) {
-        const message = "本次没有生成有效内容，请补充更多项目信息后重试";
-        setGenerateError({
-          type: "empty",
-          message,
-          detail: "AI 没有返回可展示的建议或优化文本，请继续编辑项目背景、你的职责和结果数据。",
-        });
-        showToast(message);
-        trackException("generate_empty_result", "optimize_resume_empty_result", message, "generate", sourceText.trim().length);
-        return;
-      }
-
-      setOptimization(result);
-      setResumeResults([result, ...resumeResults]);
-      trackEvent("resume_optimized", { projectId: activeProject.id, targetRole });
-
-      if (result.formatWarning) {
-        const message = "AI 返回格式异常，已使用可用文本兜底展示";
-        setGenerateError({
-          type: "format",
-          message,
-          detail: "页面没有报错，已保留 AI 返回的可读内容；你也可以重新生成以获得结构化结果。",
-        });
-        trackException("generate_format_error", "optimize_resume_format_warning", message, "generate", sourceText.trim().length);
-      }
-
-      showToast("简历优化已完成");
-    } catch (error) {
-      const errorMessage = getErrorMessage(error);
-      const message = errorMessage.includes("本次没有生成有效内容")
-        ? "本次没有生成有效内容，请补充更多项目信息后重试"
-        : "生成失败，请检查网络后重试";
-      const type = errorMessage.includes("本次没有生成有效内容") ? "empty" : "failed";
-      setGenerateError({
-        type,
-        message,
-        detail:
-          type === "empty"
-            ? "AI 返回为空，建议补充项目背景、你的职责、结果数据后再试。"
-            : "网络或 AI 服务暂时不可用，你的输入和当前结果已保留，可以重新生成。",
-      });
-      showToast(message);
-      trackException(
-        type === "empty" ? "generate_empty_result" : "generate_failed",
-        type === "empty" ? "optimize_resume_empty_response" : "optimize_resume_request_failed",
-        errorMessage,
-        "generate",
-        sourceText.trim().length,
-      );
-    } finally {
-      setIsOptimizing(false);
+      await navigator.clipboard.writeText(resumeBullets.map((bullet) => `- ${bullet}`).join("\n"));
+      setCopyState("success");
+      setToastMessage("复制成功");
+      window.setTimeout(() => setToastMessage(""), 2200);
+    } catch {
+      setCopyState("error");
+      setToastMessage("复制失败，请重试");
+      window.setTimeout(() => setToastMessage(""), 2400);
     }
   }
 
-  async function copyOptimizedContent() {
-    if (!relatedOptimization) return;
-    if (isCopyingOptimized) return;
-    setIsCopyingOptimized(true);
+  function saveResumeBullets() {
+    if (!resumeBullets.length) {
+      setToastMessage("优化失败，请重试");
+      window.setTimeout(() => setToastMessage(""), 2400);
+      return;
+    }
+
+    const confirmedFields = resumeFieldsFromProject(draft);
+    if (persistProject(
+      false,
+      {},
+      {
+        originalResumeText: rawMaterial,
+        confirmedResumeFields: confirmedFields,
+        optimizedResumeBullets: resumeBullets,
+      },
+    )) {
+      userEditedRef.current = false;
+      setResumeSaveState("saved");
+      setToastMessage("已保存到项目中");
+      window.setTimeout(() => setToastMessage(""), 2400);
+    }
+  }
+
+  async function generateInterviewPreparation() {
+    if (interviewPrepareState === "loading") return;
+
+    if (!hasProjectInfo(draft)) {
+      setToastMessage("请先完善项目资料");
+      window.setTimeout(() => setToastMessage(""), 2400);
+      return;
+    }
+
+    if (recognitionStatus === "pendingConfirm") {
+      setToastMessage("请先确认识别内容");
+      window.setTimeout(() => setToastMessage(""), 2400);
+      return;
+    }
+
+    const isSavedProject = projects.some((project) => project.id === draft.id) && saveState === "saved";
+    if (!isSavedProject) {
+      setToastMessage("请先保存项目资料后再生成面试准备");
+      window.setTimeout(() => setToastMessage(""), 2600);
+      return;
+    }
+
+    const fields = {
+      ...resumeFieldsFromProject(draft),
+      optimizedResumeBullets: resumeBullets.length ? resumeBullets : draft.optimizedResumeBullets ?? [],
+    };
+
+    setInterviewPrepareState("loading");
+    setCopiedScriptIndex(null);
+    setCopyScriptErrorIndex(null);
 
     try {
-      await navigator.clipboard.writeText(relatedOptimization.optimizedContent);
-      trackEvent("result_copied", { source: "project_detail_resume", resultId: relatedOptimization.id });
-      showToast("已复制到剪贴板");
-    } catch (error) {
-      const message = "复制失败，请手动选择文本复制";
-      showToast(message);
-      trackException("copy_failed", "optimized_content_copy_failed", getErrorMessage(error), "copy", sourceText.trim().length);
-    } finally {
-      setIsCopyingOptimized(false);
+      const response = await prepareInterviewWithAI(fields);
+      const questions = response.questions
+        .map((item) => ({
+          question: item.question.trim(),
+          answerPoints: item.answerPoints.map((point) => cleanBulletText(point)).filter(Boolean).slice(0, 3),
+          script: item.script.trim(),
+        }))
+        .filter((item) => item.question && item.script)
+        .slice(0, 5);
+
+      if (!questions.length) {
+        throw new Error("empty");
+      }
+
+      setInterviewItems(questions);
+      setInterviewPrepareState("success");
+      setInterviewSaveState("idle");
+      setToastMessage("面试准备已生成");
+      window.setTimeout(() => setToastMessage(""), 2400);
+    } catch {
+      setInterviewPrepareState("error");
+      setToastMessage("模型服务异常，请稍后重试");
+      window.setTimeout(() => setToastMessage(""), 2600);
     }
+  }
+
+  async function copyInterviewScript(script: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(script);
+      setCopiedScriptIndex(index);
+      setCopyScriptErrorIndex(null);
+      setToastMessage("复制成功");
+      window.setTimeout(() => setToastMessage(""), 2200);
+    } catch {
+      setCopiedScriptIndex(null);
+      setCopyScriptErrorIndex(index);
+      setToastMessage("复制失败，请重试");
+      window.setTimeout(() => setToastMessage(""), 2400);
+    }
+  }
+
+  function saveInterviewPreparation() {
+    if (!interviewItems.length) {
+      setToastMessage("生成失败，请重试");
+      window.setTimeout(() => setToastMessage(""), 2400);
+      return;
+    }
+
+    if (persistProject(false, {}, { interviewPreparations: interviewItems })) {
+      userEditedRef.current = false;
+      setInterviewSaveState("saved");
+      setToastMessage("已保存到项目中");
+      window.setTimeout(() => setToastMessage(""), 2400);
+    }
+  }
+
+  function saveBeforeReturn() {
+    if (!readError && initializedRef.current && recognitionStatus !== "pendingConfirm") persistProject(false);
+  }
+
+  function uncertainHint(field: string) {
+    if (!draft.recognizedProjectFields?.uncertainFields.includes(field)) return null;
+    if (draft.isProjectFieldsConfirmed) return null;
+
+    return <span className="ml-2 text-xs font-medium text-amber-700">建议人工确认</span>;
   }
 
   if (!hydrated) {
     return <EmptyState title="正在读取项目档案" description="本地数据加载后即可继续编辑。" />;
   }
 
+  if (readError) {
+    return (
+      <EmptyState
+        title="项目数据读取失败，请返回项目档案重新打开。"
+        description="页面没有清空当前数据；你可以回到项目档案重新选择项目。"
+        action={
+          <Link href="/projects">
+            <Button variant="secondary">返回项目档案</Button>
+          </Link>
+        }
+      />
+    );
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[224px_minmax(0,1fr)] lg:gap-8">
-      <aside className="h-fit overflow-x-auto border-b border-[var(--border)] bg-[var(--surface-panel)] py-3 lg:sticky lg:top-24 lg:overflow-visible lg:border-b-0 lg:border-r lg:py-4">
-        <div className="px-4 pb-3 text-xs font-bold uppercase text-[var(--text-subtle)]">项目结构</div>
-        <div className="flex min-w-max lg:block lg:min-w-0">
-          {["创建方式", "项目原始内容", "AI优化区域", "简历版本对比", "面试准备"].map((item) => (
-            <a
-              key={item}
-              href={`#${item}`}
-              className="block border-b-2 border-transparent px-4 py-2 text-sm text-[var(--text-muted)] hover:border-[var(--primary)] hover:bg-white lg:border-b-0 lg:border-r-2"
+    <div className="mx-auto max-w-7xl">
+      <Toast message={toastMessage} />
+
+      <div className="grid gap-6 lg:grid-cols-[224px_minmax(0,1fr)] lg:gap-8">
+        <aside className="h-fit overflow-x-auto border-b border-[var(--border)] bg-[var(--surface-panel)] py-3 lg:sticky lg:top-24 lg:overflow-visible lg:border-b-0 lg:border-r lg:py-4">
+          <nav className="flex min-w-max lg:block lg:min-w-0">
+            <Link
+              href="/projects"
+              onClick={saveBeforeReturn}
+              className="block border-b-2 border-transparent px-4 py-2 text-left text-sm font-medium text-[var(--primary)] transition lg:w-full lg:border-b-0 lg:border-r-2"
             >
-              {item}
-            </a>
-          ))}
-        </div>
-      </aside>
-
-      <section className="mx-auto w-full max-w-5xl">
-        <Toast message={toastMessage} />
-
-        <div className="mb-6 flex flex-col gap-4 border-b border-[var(--border)] pb-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">项目档案</h1>
-            <p className="mt-2 text-sm text-[var(--text-muted)]">管理你的项目经历，用于简历优化和面试准备</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={startNewProject}>
-              <FileText size={16} />
-              新建项目
-            </Button>
-          </div>
-        </div>
-
-        <section id="项目列表" className="mb-8 rounded border border-[var(--border)] bg-white p-5">
-          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <h2 className="text-xl font-semibold">项目列表</h2>
-            <p className="text-sm text-[var(--text-muted)]">已保存的项目会显示在这里，点击编辑可继续完善。</p>
-          </div>
-          {projects.length ? (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
-              {projects.map((project) => {
-                const isCurrentProject = project.id === selectedId;
-                const cardTitle = projectCardTitle(project);
-                const cardBackground = projectCardBackground(project);
-
-                return (
-                  <div
-                    key={project.id}
-                    id={`project-card-${project.id}`}
-                    onClick={() => selectProject(project)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        selectProject(project);
-                      }
-                    }}
-                    className={`flex h-56 min-w-0 flex-col rounded border bg-white p-4 text-left transition hover:border-[var(--primary)] ${isCurrentProject ? "border-[var(--primary)]" : "border-[var(--border)]"}`}
-                  >
-                    <div className="flex min-w-0 items-start justify-between gap-3">
-                      <h3 className="line-clamp-2 min-w-0 break-words text-base font-semibold leading-6" title={cardTitle}>
-                        {cardTitle}
-                      </h3>
-                      <span className="shrink-0 rounded bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
-                        {isCurrentProject ? "编辑中" : "已保存"}
-                      </span>
-                    </div>
-                    <p className="mt-2 line-clamp-3 min-w-0 break-words text-sm leading-6 text-[var(--text-muted)]" title={cardBackground}>
-                      {cardBackground}
-                    </p>
-                    <div className="mt-auto pt-4">
-                      <p className="text-xs text-[var(--text-subtle)]">最近保存：{formatSavedTime(project.updatedAt)}</p>
-                    </div>
-                    <div className="mt-3 flex shrink-0 gap-2">
-                      <Button
-                        variant="secondary"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          selectProject(project);
-                        }}
-                      >
-                        编辑
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={deletingProjectIds.has(project.id)}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deleteProjectById(project.id);
-                        }}
-                      >
-                        {deletingProjectIds.has(project.id) ? "删除中..." : "删除"}
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-6">
-              <h3 className="font-semibold">暂无项目</h3>
-              <p className="mt-2 text-sm text-[var(--text-muted)]">你可以通过 AI识别 或 手动填写 创建第一个项目。</p>
-              <Button onClick={startNewProject} className="mt-4">
-                新建项目
-              </Button>
-            </div>
-          )}
-        </section>
-
-        <section id="创建方式" className="mb-8 rounded border border-[var(--border)] bg-white p-5">
-          <h2 className="mb-4 text-xl font-semibold">{formTitle}</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className={`rounded border p-4 ${creationMode === "ai" ? "border-[var(--primary)] bg-[var(--surface-panel)]" : "border-[var(--border)] bg-white"}`}>
-              <div className="mb-4">
-                <h3 className="font-semibold">AI识别创建</h3>
-                <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">上传或粘贴项目资料，AI自动提取字段</p>
-              </div>
-              <Button variant={creationMode === "ai" ? "primary" : "secondary"} onClick={() => createNew("ai")}>
-                <FileText size={16} />
-                AI识别
-              </Button>
-            </div>
-
-            <div className={`rounded border p-4 ${creationMode === "manual" ? "border-[var(--primary)] bg-[var(--surface-panel)]" : "border-[var(--border)] bg-white"}`}>
-              <div className="mb-4">
-                <h3 className="font-semibold">手动创建</h3>
-                <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">直接填写项目背景、用户痛点、解决方案等信息</p>
-              </div>
-              <Button variant={creationMode === "manual" ? "primary" : "secondary"} onClick={() => createNew("manual")}>
-                手动填写
-              </Button>
-            </div>
-          </div>
-
-          {creationMode === "ai" ? (
-            <div className="mt-5 grid gap-4 md:grid-cols-2">
-              <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded border border-dashed border-[var(--border)] bg-[var(--surface-panel)] px-4 py-5 text-sm text-[var(--text-muted)]">
-                <Upload size={20} className="mb-2 text-[var(--primary)]" />
-                支持 PDF / Word / PPT / 文本内容
-                <input className="hidden" type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,text/plain" onChange={(event) => handleFile(event.target.files?.[0])} />
-              </label>
-              <div>
-                <label className="mb-2 block text-sm font-semibold">粘贴项目资料</label>
-                <Textarea
-                  value={sourceText}
-                  onChange={(event) => updateSourceText(event.target.value)}
-                  rows={5}
-                  maxLength={sourceTextMaxLength}
-                  aria-invalid={Boolean(sourceTextError)}
-                  placeholder="请粘贴项目介绍、PRD、简历项目经历或面试准备资料"
-                  className={sourceTextError ? "border-red-400 bg-red-50" : ""}
-                />
-                <div className="mt-2 flex flex-col gap-2 text-xs sm:flex-row sm:items-center sm:justify-between">
-                  <span className={sourceTextError ? "text-red-600" : "text-[var(--text-subtle)]"}>
-                    {sourceTextError || `最多 ${sourceTextMaxLength} 字，当前 ${sourceText.length} 字`}
-                  </span>
-                  <span className={sourceText.length >= sourceTextMaxLength ? "text-red-600" : "text-[var(--text-subtle)]"}>
-                    {sourceText.length}/{sourceTextMaxLength}
-                  </span>
-                </div>
-                <div className="mt-3 flex justify-end">
-                  <Button onClick={identifyFromText} disabled={isRecognizing}>
-                    <FileText size={16} />
-                    {isRecognizing ? "生成中..." : "开始AI识别"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <p className="mt-5 rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4 text-sm text-[var(--text-muted)]">保持现有表单填写方式，填写后点击保存项目。</p>
-          )}
-        </section>
-
-        <section id="项目原始内容" className="mb-8 rounded border border-[var(--border)] bg-white p-6">
-          <h2 className="text-xl font-semibold">项目信息编辑</h2>
-          <p className="mt-2 rounded border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">当前模式：{modeLabel}</p>
-          {aiMissingFields.length ? (
-            <div className="mt-3 rounded border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
-              <p className="font-medium">AI已完成初步整理，部分字段建议补充完善</p>
-              <p className="mt-1">检测到 {aiMissingFields.length} 个字段待补充：{aiMissingFields.map((field) => field.label).join("、")}</p>
+              返回项目档案
+            </Link>
+            {visibleSections.map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => {
+                  userEditedRef.current = true;
+                  scrollToSection(section.id);
+                }}
+                className={`block border-b-2 border-transparent px-4 py-2 text-left text-sm transition lg:w-full lg:border-b-0 lg:border-r-2 ${
+                  activeSection === section.id
+                    ? "border-[var(--primary)] bg-white font-medium text-[var(--foreground)]"
+                    : "text-[var(--text-muted)] hover:border-[var(--primary)] hover:bg-white"
+                }`}
+              >
+                {section.label}
+              </button>
+            ))}
+          </nav>
+          {!isExistingProject && visibleSections.length <= 1 ? (
+            <div className="px-4 py-2 text-sm leading-6 text-[var(--text-muted)]">
+              粘贴原始资料后，将自动生成后续编辑导航。
             </div>
           ) : null}
-          <div className="mb-6 mt-5">
-            <label className="mb-2 block text-sm font-semibold">
-              项目名称 {missingAiFieldKeys.has("name") ? <span className="text-yellow-700">⚠ 待补充</span> : null}
-            </label>
-            <Input
-              value={draft.name}
-              onChange={(event) => updateField("name", event.target.value)}
-              placeholder="项目名称"
-              className={`text-2xl font-semibold ${missingAiFieldKeys.has("name") ? "border-yellow-300 bg-yellow-50" : ""}`}
-            />
-          </div>
-          <div className="space-y-6">
-            {sections.map((section) => (
-              <div key={section.id} id={section.id}>
-                <label className="mb-2 block text-sm font-semibold">
-                  {section.label} {missingAiFieldKeys.has(section.key) ? <span className="text-yellow-700">⚠ 待补充</span> : null}
-                </label>
-                <Textarea
-                  rows={section.key === "review" ? 5 : 3}
-                  value={draft[section.key]}
-                  onChange={(event) => updateField(section.key, event.target.value)}
-                  placeholder={section.placeholder}
-                  className={missingAiFieldKeys.has(section.key) ? "border-yellow-300 bg-yellow-50" : ""}
-                />
-              </div>
-            ))}
-          </div>
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {saveError ? (
-              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {saveError}
-              </div>
-            ) : (
-              <span />
-            )}
-            <Button onClick={saveProject} disabled={isSaving}>
-              <Save size={16} />
-              {isSaving ? "保存中..." : saveError ? "重新保存" : "保存项目"}
-            </Button>
-          </div>
-        </section>
+        </aside>
 
-        <section className="mb-8 rounded border border-[var(--border)] bg-white p-6">
-          <h2 className="mb-5 text-xl font-semibold">规则分析结果</h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
-              <p className="text-sm font-medium text-[var(--text-muted)]">项目类型</p>
-              <p className="mt-3 text-lg font-semibold">
-                {projectTypeResult.projectType || "建议补充"}
+        <section className="min-w-0 space-y-6">
+          <div className="flex flex-col gap-4 border-b border-[var(--border)] pb-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
+                <h1 className="text-3xl font-semibold tracking-tight">编辑项目档案</h1>
+                <span className="rounded bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
+                  {projectStatus}
+                </span>
+              </div>
+              <div className={`mt-3 rounded border px-3 py-2 text-sm ${
+                saveState === "error"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-[var(--border)] bg-[var(--surface-panel)] text-[var(--text-muted)]"
+              }`}>
+                {saveStatusText}
+              </div>
+            </div>
+          </div>
+
+          <section id="material-import" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold">资料导入</h2>
+              <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
+                粘贴你的原始项目经历、简历片段、项目复盘或作品介绍，系统会识别并整理为结构化项目资料。
               </p>
             </div>
-
-            <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
-              <p className="text-sm font-medium text-[var(--text-muted)]">缺失字段</p>
-              {missingFieldsResult.missingFields.length ? (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {missingFieldsResult.missingFields.map((field) => (
-                    <span key={field} className="rounded bg-white px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
-                      {field}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-[var(--text-muted)]">建议补充</p>
-              )}
-            </div>
-
-            <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
-              <p className="text-sm font-medium text-[var(--text-muted)]">建议补充指标</p>
-              {suggestedMetricsResult.metrics.length ? (
-                <ul className="mt-3 space-y-2 text-sm text-[var(--text-muted)]">
-                  {suggestedMetricsResult.metrics.map((metric) => (
-                    <li key={metric}>- {metric}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-3 text-sm text-[var(--text-muted)]">建议补充</p>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section id="AI优化区域" className="mb-8 rounded border border-[var(--border)] bg-white p-6">
-          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">AI优化区域</h2>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">先选择目标岗位，再根据当前项目内容生成建议。</p>
-            </div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <Select value={targetRole} onChange={(event) => setTargetRole(event.target.value)} className="w-44">
-                {targetRoles.map((role) => <option key={role} value={role}>{role}</option>)}
-              </Select>
-              <Button onClick={startOptimization} disabled={isOptimizing}>
-                <SendHorizontal size={16} />
-                {isOptimizing ? "生成中..." : "开始优化"}
+            <Textarea
+              rows={6}
+              value={rawMaterial}
+              onChange={(event) => updateRawMaterial(event.target.value)}
+              placeholder="粘贴原始项目资料"
+              className="max-h-40 overflow-y-auto"
+            />
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-[var(--text-subtle)]">已输入 {rawMaterial.length} 字</p>
+              <Button onClick={recognizeProject} disabled={isRecognizing}>
+                <Sparkles size={16} />
+                {isRecognizing ? "识别中..." : "AI识别项目资料"}
               </Button>
             </div>
-          </div>
-          {generateError ? (
-            <div className="mb-4 rounded border border-red-200 bg-red-50 p-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-red-600" />
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-semibold text-red-700">{generateError.message}</h3>
-                  <p className="mt-1 text-sm leading-6 text-red-700">{generateError.detail}</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {generateError.type === "empty" ? (
-                      <Button variant="secondary" onClick={() => document.getElementById("项目原始内容")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-                        继续编辑
-                      </Button>
-                    ) : null}
-                    <Button onClick={startOptimization} disabled={isOptimizing}>
-                      <RefreshCw size={15} />
-                      重新生成
+          </section>
+
+          <section id="project-info" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold">项目资料</h2>
+              <p className="mt-1 text-sm text-[var(--text-muted)]">识别后的结构化内容会填入这里，你也可以继续手动编辑。</p>
+            </div>
+
+            {isRecognitionPending ? (
+              <div className="mb-5 rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--foreground)]">AI 已识别项目资料，当前状态：待确认</p>
+                    <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
+                      请检查并修改下方内容，确认无误后点击“确认保存识别结果”。确认前，简历优化和面试准备不会解锁。
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                    <Button onClick={confirmRecognitionResult} disabled={saveState === "saving"}>
+                      <Save size={16} />
+                      确认保存识别结果
+                    </Button>
+                    <Button variant="secondary" onClick={recognizeProject} disabled={isRecognizing}>
+                      <Sparkles size={16} />
+                      {isRecognizing ? "识别中..." : "重新识别"}
                     </Button>
                   </div>
                 </div>
               </div>
-            </div>
-          ) : null}
-          {relatedOptimization ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              {relatedOptimization.suggestions.map((suggestion) => (
-                <div key={suggestion} className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4 text-sm leading-6">
-                  {suggestion}
+            ) : null}
+
+            {recognitionStatus === "confirmed" ? (
+              <div className="mb-5 rounded border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">
+                识别结果已确认保存，可以继续进行后续操作。
+              </div>
+            ) : null}
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-4 text-base font-semibold">基础信息</h3>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">项目名称{uncertainHint("projectName")}</label>
+                    <Input value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">求职方向</label>
+                    <Select value={targetRole} onChange={(event) => updateTargetRole(event.target.value)}>
+                      {targetRoleOptions.map((role) => (
+                        <option key={role} value={role}>{role}</option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">项目状态</label>
+                    <Select value={projectStatus} onChange={(event) => updateProjectStatus(event.target.value)}>
+                      {statusOptions.map((item) => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">最近编辑时间</label>
+                    <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">
+                      {formatTime(draft.updatedAt)}
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="mb-2 block text-sm font-semibold">项目简介</label>
+                    <Textarea
+                      rows={4}
+                      value={draft.summary || ""}
+                      onChange={(event) => updateDraft("summary", event.target.value)}
+                      placeholder={fieldPlaceholder()}
+                    />
+                  </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="等待优化" description="点击开始优化后，会生成项目描述、成果、指标和岗位匹配建议。" />
-          )}
-        </section>
+              </div>
 
-        <section id="简历版本对比" className="mb-8 rounded border border-[var(--border)] bg-white p-6">
-          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-xl font-semibold">简历版本对比</h2>
-            <Button variant="secondary" onClick={copyOptimizedContent} disabled={!relatedOptimization || isCopyingOptimized}>
-              <Clipboard size={15} />
-              {isCopyingOptimized ? "复制中..." : "复制优化内容"}
-            </Button>
-          </div>
-          <div className="grid gap-5 md:grid-cols-2">
-            <div className="rounded border border-[var(--border)] p-4">
-              <h3 className="mb-3 font-semibold">原始版本</h3>
-              <pre className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-muted)]">{originalResume(activeProject)}</pre>
-            </div>
-            <div className="rounded border border-[var(--border)] p-4">
-              <h3 className="mb-3 font-semibold">优化版本</h3>
-              <pre className="whitespace-pre-wrap text-sm leading-7">{relatedOptimization?.optimizedContent || "完成 AI 优化后展示优化版本。"}</pre>
-            </div>
-          </div>
-        </section>
+              <div>
+                <h3 className="mb-4 text-base font-semibold">项目逻辑</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">项目背景{uncertainHint("background")}</label>
+                    <Textarea rows={3} value={draft.background} onChange={(event) => updateDraft("background", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">目标用户{uncertainHint("targetUsers")}</label>
+                    <Textarea rows={3} value={draft.targetUsers} onChange={(event) => updateDraft("targetUsers", event.target.value)} placeholder="未识别到目标用户，请手动补充" />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">用户痛点{uncertainHint("painPoint")}</label>
+                    <Textarea rows={3} value={draft.painPoints} onChange={(event) => updateDraft("painPoints", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">关键行动{uncertainHint("actions")}</label>
+                    <Textarea rows={3} value={draft.solution} onChange={(event) => updateDraft("solution", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                </div>
+              </div>
 
-        <section id="面试准备" className="rounded border border-[var(--border)] bg-white p-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold">面试准备</h2>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">基于当前项目生成面试题和 STAR 回答建议。</p>
+              <div>
+                <h3 className="mb-4 text-base font-semibold">个人表达</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">我的职责{uncertainHint("responsibility")}</label>
+                    <Textarea rows={3} value={draft.responsibilities} onChange={(event) => updateDraft("responsibilities", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">项目成果{uncertainHint("result")}</label>
+                    <Textarea rows={3} value={draft.results} onChange={(event) => updateDraft("results", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">数据指标{uncertainHint("metrics")}</label>
+                    <Textarea rows={3} value={draft.metrics} onChange={(event) => updateDraft("metrics", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">使用工具{uncertainHint("tools")}</label>
+                    <Textarea rows={3} value={draft.tools || ""} onChange={(event) => updateDraft("tools", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold">项目复盘{uncertainHint("reflection")}</label>
+                    <Textarea rows={4} value={draft.review} onChange={(event) => updateDraft("review", event.target.value)} placeholder={fieldPlaceholder()} />
+                  </div>
+                </div>
+              </div>
             </div>
-            <Link href="/interview">
-              <Button>
+          </section>
+
+          {isNextFlowUnlocked ? (
+          <section id="resume-optimization" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">简历优化</h2>
+                <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
+                  基于已确认的项目资料生成 3-5 条可直接放入简历的项目 bullet。
+                </p>
+              </div>
+              <Button onClick={optimizeResumeBullets} disabled={resumeOptimizeState === "loading"}>
                 <SendHorizontal size={16} />
-                生成面试题
+                {resumeOptimizeState === "loading"
+                  ? "优化中..."
+                  : resumeOptimizeState === "success"
+                    ? "优化完成"
+                    : resumeOptimizeState === "error"
+                      ? "重新优化"
+                      : "优化简历表达"}
+              </Button>
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+              <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                <h3 className="mb-3 text-base font-semibold">已确认结构化内容</h3>
+                <div className="max-h-[460px] space-y-3 overflow-y-auto pr-1">
+                  {[
+                    ["项目名称", draft.name],
+                    ["项目背景", draft.background],
+                    ["用户痛点", draft.painPoints],
+                    ["个人职责", draft.responsibilities],
+                    ["关键行动", draft.solution],
+                    ["项目成果", draft.results],
+                    ["数据指标", draft.metrics],
+                    ["使用工具", draft.tools || ""],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded border border-[var(--border)] bg-white p-3">
+                      <p className="text-xs font-medium text-[var(--text-subtle)]">{label}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground)]">
+                        {value || "待补充"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded border border-[var(--border)] p-4">
+                <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-base font-semibold">简历优化结果</h3>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" onClick={copyResumeBullets} disabled={!resumeBullets.length}>
+                      <Clipboard size={15} />
+                      {copyState === "success" ? "复制成功" : copyState === "error" ? "复制失败，请重试" : "复制"}
+                    </Button>
+                    <Button variant="secondary" onClick={optimizeResumeBullets} disabled={resumeOptimizeState === "loading"}>
+                      <RotateCcw size={15} />
+                      重新优化
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="max-h-[360px] overflow-y-auto rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                  {resumeBullets.length ? (
+                    <ul className="list-disc space-y-3 pl-5 text-sm text-[var(--foreground)]">
+                      {resumeBullets.map((bullet, index) => (
+                        <li key={`${bullet}-${index}`} className="break-words leading-7">
+                          {cleanBulletText(bullet)}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm leading-6 text-[var(--text-muted)]">
+                      确认识别内容后，点击“优化简历表达”生成结果。
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button onClick={saveResumeBullets} disabled={!resumeBullets.length}>
+                    <Save size={16} />
+                    {resumeSaveState === "saved" ? "已保存到项目中" : "保存优化结果"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </section>
+          ) : null}
+
+          {isNextFlowUnlocked ? (
+          <section id="interview-preparation" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold">面试准备</h2>
+                <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
+                  基于当前项目资料和简历优化结果，生成面试追问、回答思路和可练习话术。
+                </p>
+              </div>
+              <Button onClick={generateInterviewPreparation} disabled={interviewPrepareState === "loading"}>
+                <SendHorizontal size={16} />
+                {interviewPrepareState === "loading"
+                  ? "生成中..."
+                  : interviewPrepareState === "success"
+                    ? "重新生成"
+                    : interviewPrepareState === "error"
+                      ? "重试生成"
+                      : "生成面试准备"}
+              </Button>
+            </div>
+
+            {interviewItems.length ? (
+              <div className="space-y-4">
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {interviewItems.map((item, index) => (
+                    <article key={`${item.question}-${index}`} className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <h3 className="text-base font-semibold leading-6">
+                          问题 {index + 1}：{item.question}
+                        </h3>
+                        <Button
+                          variant="secondary"
+                          onClick={() => copyInterviewScript(item.script, index)}
+                          className="shrink-0"
+                        >
+                          <Clipboard size={15} />
+                          {copiedScriptIndex === index
+                            ? "复制成功"
+                            : copyScriptErrorIndex === index
+                              ? "复制失败，请重试"
+                              : "复制话术"}
+                        </Button>
+                      </div>
+
+                      <div className="space-y-3 text-sm">
+                        <div>
+                          <p className="mb-2 font-medium text-[var(--text-muted)]">回答思路</p>
+                          <ul className="list-disc space-y-1.5 pl-5 leading-6 text-[var(--foreground)]">
+                            {item.answerPoints.slice(0, 3).map((point, pointIndex) => (
+                              <li key={`${point}-${pointIndex}`} className="break-words">
+                                {cleanBulletText(point)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 font-medium text-[var(--text-muted)]">面试话术</p>
+                          <div className="max-h-36 overflow-y-auto rounded border border-[var(--border)] bg-white p-3">
+                            <p className="break-words leading-7 text-[var(--foreground)]">{item.script}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="flex justify-end">
+                  <Button onClick={saveInterviewPreparation}>
+                    <Save size={16} />
+                    {interviewSaveState === "saved" ? "已保存到项目中" : "保存面试准备"}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                <p className="text-sm leading-6 text-[var(--text-muted)]">
+                  保存项目资料后，点击“生成面试准备”生成 5 个高概率追问和练习话术。
+                </p>
+              </div>
+            )}
+          </section>
+          ) : null}
+
+          <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-6 sm:flex-row sm:items-center sm:justify-end">
+            <Button onClick={saveProject} disabled={saveState === "saving"}>
+              <Save size={16} />
+              {saveState === "saving" ? "保存中..." : "保存项目"}
+            </Button>
+            <Link href="/projects" onClick={saveBeforeReturn}>
+              <Button variant="secondary" className="w-full sm:w-auto">
+                返回项目档案
               </Button>
             </Link>
           </div>
         </section>
-      </section>
+      </div>
     </div>
   );
 }

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:parser": "node --no-warnings --experimental-strip-types scripts/test-structured-project-parser.mjs"
+    "test:parser": "node --no-warnings --experimental-strip-types scripts/test-structured-project-parser.mjs",
+    "test:target-users": "node --no-warnings --experimental-strip-types scripts/test-target-users.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",

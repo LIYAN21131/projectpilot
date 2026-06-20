@@ -1,5 +1,5 @@
 import type { InterviewQuestion, StarAnswer } from "@/types/interview";
-import type { Project } from "@/types/project";
+import type { InterviewPreparationItem, Project, ResumeProjectFields } from "@/types/project";
 import type { ResumeOptimizationResult } from "@/types/resume";
 import { generateInterviewQuestions } from "./generateInterviewQuestions";
 import { generateStarAnswer } from "./generateStarAnswer";
@@ -54,6 +54,18 @@ export async function optimizeResumeWithAI(
   } catch {
     return optimizeResume(project, targetRole);
   }
+}
+
+export async function optimizeResumeBulletsWithAI(
+  fields: ResumeProjectFields,
+): Promise<{ bullets: string[] }> {
+  return postAI<{ bullets: string[] }>("/api/resume-optimize", fields);
+}
+
+export async function prepareInterviewWithAI(
+  fields: ResumeProjectFields & { optimizedResumeBullets: string[] },
+): Promise<{ questions: InterviewPreparationItem[] }> {
+  return postAI<{ questions: InterviewPreparationItem[] }>("/api/interview-prepare", fields);
 }
 
 export async function generateInterviewQuestionsWithAI(
