@@ -1,6 +1,7 @@
 "use client";
 
-import { Bell, Grid3X3, Search, UserCircle } from "lucide-react";
+import Link from "next/link";
+import { BriefcaseBusiness } from "lucide-react";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
 
 export function TopBar({ context }: { context?: string }) {
@@ -8,27 +9,22 @@ export function TopBar({ context }: { context?: string }) {
   const currentProject = projects[0]?.name ?? "未整理";
 
   return (
-    <header className="sticky top-0 z-10 flex h-16 items-center justify-between gap-3 border-b border-[var(--border)] bg-white px-4 sm:px-6 md:px-8">
-      <div className="flex min-w-0 flex-1 items-center gap-4 lg:gap-7">
-        <div className="relative min-w-0 flex-1 sm:max-w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" size={18} />
-          <input
-            className="focus-ring w-full rounded border border-transparent bg-[var(--surface-muted)] py-2 pl-10 pr-3 text-sm"
-            placeholder={context ?? "搜索项目..."}
-          />
-        </div>
-        <div className="hidden max-w-xs items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-panel)] px-4 py-1.5 text-sm lg:flex">
-          <span className="size-2 rounded-full bg-[var(--success)]" />
-          <span className="text-[var(--text-muted)]">当前项目：</span>
-          <span className="max-w-48 truncate font-medium">{currentProject}</span>
-        </div>
+    <header className="sticky top-0 z-10 flex min-h-16 items-center justify-between gap-4 border-b border-[var(--border)] bg-white/95 px-4 backdrop-blur sm:px-6 md:px-8">
+      <Link href="/projects" className="flex items-center gap-2.5 md:hidden">
+        <span className="flex size-8 items-center justify-center rounded-lg bg-[var(--primary)] text-white">
+          <BriefcaseBusiness size={17} />
+        </span>
+        <span className="font-semibold tracking-tight">ProjectPilot</span>
+      </Link>
+      <div className="hidden min-w-0 md:block">
+        <p className="text-xs font-medium text-[var(--text-subtle)]">{context ?? "项目工作台"}</p>
+        <p className="mt-0.5 max-w-lg truncate text-sm font-medium text-[var(--foreground)]">
+          当前项目：{currentProject}
+        </p>
       </div>
-      <div className="flex shrink-0 items-center gap-3 text-[var(--text-muted)] sm:gap-5">
-        <Bell size={21} />
-        <Grid3X3 size={21} className="hidden sm:block" />
-        <div className="flex size-9 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--primary)] text-xs font-bold text-white">
-          <UserCircle size={20} />
-        </div>
+      <div className="hidden items-center gap-2 text-xs text-[var(--text-muted)] sm:flex">
+        <span className="size-2 rounded-full bg-[var(--success)]" />
+        数据保存在当前浏览器
       </div>
     </header>
   );

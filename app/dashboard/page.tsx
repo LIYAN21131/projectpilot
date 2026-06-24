@@ -30,8 +30,20 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   return (
-    <AppShell searchPlaceholder="搜索项目...">
-      <PageHeader title="欢迎回来" />
+    <AppShell searchPlaceholder="项目进度概览">
+      <PageHeader
+        eyebrow="工作台"
+        title="项目表达进度"
+        description="查看已整理的项目、简历版本和面试准备记录，并继续处理最近的内容。"
+        action={
+          <Link
+            href="/projects/edit"
+            className="inline-flex min-h-10 items-center rounded-lg bg-[var(--primary)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--primary-strong)]"
+          >
+            新建项目
+          </Link>
+        }
+      />
       <div className="grid gap-4 md:grid-cols-3 md:gap-5">
         <MetricCard
           title="项目总数"
@@ -56,10 +68,13 @@ export default function DashboardPage() {
         />
       </div>
 
-      <section className="mt-8">
+      <section className="mt-10">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-xl font-semibold">最近编辑项目</h2>
-          <Link href="/projects" className="text-sm font-medium text-[var(--primary)]">查看全部</Link>
+          <div>
+            <h2 className="text-lg font-semibold">最近编辑</h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">继续完善最近处理的项目档案。</p>
+          </div>
+          <Link href="/projects" className="text-sm font-semibold text-[var(--primary)] hover:text-[var(--primary-strong)]">查看全部</Link>
         </div>
         {projects.length ? (
           <div className="grid gap-4 md:grid-cols-3">
@@ -67,30 +82,33 @@ export default function DashboardPage() {
               <Link
                 key={project.id}
                 href="/projects"
-                className="rounded border border-[var(--border)] bg-white p-4 transition hover:border-[var(--primary)]"
+                className="rounded-lg border border-[var(--border)] bg-white p-5 transition-colors duration-200 hover:border-[#b7bcc6] hover:bg-[var(--surface-panel)]"
               >
-                <h3 className="font-semibold">{project.name}</h3>
+                <h3 className="font-semibold leading-6">{project.name}</h3>
                 <p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--text-muted)]">
                   {project.background || "暂未填写项目背景"}
                 </p>
-                <p className="mt-4 text-xs text-[var(--text-subtle)]">
-                  {new Date(project.updatedAt).toLocaleString()}
+                <p className="mt-5 border-t border-[var(--border-soft)] pt-3 text-xs text-[var(--text-subtle)]">
+                  更新于 {new Date(project.updatedAt).toLocaleString()}
                 </p>
               </Link>
             ))}
           </div>
         ) : (
           <EmptyState
-            title="暂无近期项目，开始创建一个吧"
-            description="保存项目经历后，这里会展示最近编辑的项目。"
+            title="暂无项目"
+            description="创建并保存项目档案后，最近编辑内容会显示在这里。"
           />
         )}
       </section>
 
-      <section className="mt-8">
-        <div className="rounded border border-[var(--border)] bg-white">
-          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-3">
-            <h2 className="text-sm font-semibold">最近生成记录</h2>
+      <section className="mt-10">
+        <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-white">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
+            <div>
+              <h2 className="text-base font-semibold">最近产出</h2>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">简历优化与面试准备的保存记录。</p>
+            </div>
             <History size={17} className="text-[var(--text-subtle)]" />
           </div>
           {recentRecords.length ? (
@@ -99,7 +117,7 @@ export default function DashboardPage() {
                 <Link
                   key={record.id}
                   href={record.href}
-                  className="grid gap-1 px-5 py-3 text-sm hover:bg-[var(--surface-panel)] sm:grid-cols-[120px_1fr_180px] sm:gap-0"
+                  className="grid gap-1 px-5 py-3.5 text-sm transition-colors hover:bg-[var(--surface-panel)] sm:grid-cols-[120px_1fr_180px] sm:gap-0"
                 >
                   <span className="font-medium text-[var(--primary)]">{record.type}</span>
                   <span>{record.title}</span>

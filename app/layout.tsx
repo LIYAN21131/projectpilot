@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "ProjectPilot",
-  description: "AI 简历优化与项目面试准备工具",
+  description: "整理项目经历，生成可用于简历与面试的专业表达。",
 };
 
 export default function RootLayout({

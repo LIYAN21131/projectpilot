@@ -17,19 +17,16 @@ export function MetricCard({
   return (
     <Link
       href={href}
-      className="group block rounded border border-[var(--border)] bg-white p-5 transition hover:border-[var(--primary)] hover:shadow-sm"
+      className="group block rounded-lg border border-[var(--border)] bg-white p-5 transition-colors duration-200 hover:border-[#b7bcc6] hover:bg-[var(--surface-panel)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-blue-600/15"
     >
-      <div className="flex items-start justify-between">
-        <div className="flex size-11 items-center justify-center rounded bg-[var(--primary-soft)] text-[var(--primary)]">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex size-10 items-center justify-center rounded-lg border border-blue-100 bg-[var(--primary-soft)] text-[var(--primary)]">
           {icon}
         </div>
         <span className="text-sm font-medium text-[var(--text-muted)]">{title}</span>
       </div>
-      <div className="mt-8 h-1.5 rounded-full bg-[var(--surface-muted)]">
-        <div className="h-1.5 w-1/3 rounded-full bg-[var(--primary)] transition group-hover:w-2/3" />
-      </div>
-      <div className="mt-3 flex items-center justify-between">
-        <span className="font-mono text-xl font-semibold">{value}</span>
+      <div className="mt-6 flex items-end justify-between gap-4">
+        <span className="text-3xl font-semibold tracking-tight">{value}</span>
         <span className="text-xs text-[var(--text-muted)]">{helper}</span>
       </div>
     </Link>

@@ -89,14 +89,15 @@ export function ResumeOptimizationPanel() {
   }
 
   return (
-    <div className="grid min-h-[720px] overflow-hidden rounded border border-[var(--border)] bg-white xl:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="grid min-h-[720px] overflow-hidden rounded-lg border border-[var(--border)] bg-white xl:grid-cols-[minmax(0,1fr)_360px]">
       <Toast message={toastMessage} />
       <section className="p-4 sm:p-6 lg:p-8">
-        <div className="mb-8 rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4 text-sm text-[var(--text-muted)]">
-          已同步当前项目内容
+        <div className="mb-8 flex items-center gap-2 rounded-lg border border-blue-100 bg-[var(--primary-soft)] px-4 py-3 text-sm text-blue-800">
+          <span className="size-2 rounded-full bg-[var(--primary)]" />
+          使用项目档案中的已保存内容
         </div>
-        <h2 className="text-2xl font-semibold">简历内容编辑</h2>
-        <p className="mt-2 text-sm text-[var(--text-muted)]">选择项目和目标岗位，生成适合投递的项目经历表达。</p>
+        <h2 className="text-xl font-semibold">生成设置</h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">选择项目和目标岗位，生成后请结合真实经历逐项核对。</p>
 
         <div className="mt-8 grid gap-5 md:grid-cols-2">
           <label className="space-y-2">
@@ -114,16 +115,22 @@ export function ResumeOptimizationPanel() {
         </div>
 
         <div className="mt-8 grid gap-5 lg:grid-cols-2">
-          <section className="rounded border border-[var(--border)] p-5">
-            <h3 className="mb-4 text-lg font-semibold">原始版本</h3>
+          <section className="rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] p-5">
+            <div className="mb-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">输入</p>
+              <h3 className="mt-1 text-base font-semibold">项目原始内容</h3>
+            </div>
             <pre className="whitespace-pre-wrap text-sm leading-7 text-[var(--text-muted)]">{originalResume(selectedProject)}</pre>
           </section>
-          <section className="rounded border border-[var(--border)] p-5">
-            <h3 className="mb-4 text-lg font-semibold">优化版本</h3>
+          <section className="rounded-lg border border-[var(--border)] p-5">
+            <div className="mb-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">输出</p>
+              <h3 className="mt-1 text-base font-semibold">简历项目表述</h3>
+            </div>
             {effectiveResult ? (
               <pre className="whitespace-pre-wrap text-sm leading-7">{effectiveResult.optimizedContent}</pre>
             ) : (
-              <p className="text-sm leading-7 text-[var(--text-muted)]">点击开始优化后，这里会展示优化版简历内容。</p>
+              <p className="text-sm leading-7 text-[var(--text-muted)]">生成后将在此显示可编辑、可复制的项目经历表述。</p>
             )}
           </section>
         </div>
@@ -131,7 +138,7 @@ export function ResumeOptimizationPanel() {
         <div className="mt-8 flex items-center gap-3">
           <Button onClick={runOptimization} disabled={isOptimizing} className="px-5">
             <SendHorizontal size={17} />
-            {isOptimizing ? "优化中..." : "开始优化"}
+            {isOptimizing ? "正在生成..." : "生成简历表述"}
           </Button>
           <Button variant="secondary" onClick={copyResult} disabled={!effectiveResult || isCopying}>
             <Clipboard size={15} />
@@ -141,16 +148,17 @@ export function ResumeOptimizationPanel() {
       </section>
 
       <aside className="border-t border-[var(--border)] bg-[var(--surface-panel)] p-4 sm:p-6 lg:p-8 xl:border-l xl:border-t-0">
-        <div className="mb-8 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h3 className="text-xl font-semibold">AI 分析结果</h3>
-          <span className="text-sm text-[var(--text-muted)]">最后更新：刚刚</span>
+        <div className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">校对参考</p>
+          <h3 className="mt-1 text-lg font-semibold">表达建议</h3>
+          <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">用于检查信息完整性，不替代你的真实项目判断。</p>
         </div>
         {!effectiveResult ? (
-          <EmptyState title="等待生成优化结果" description="AI 分析项目内容后，会输出四类优化建议。" />
+          <EmptyState title="暂无表达建议" description="生成简历表述后，这里会同步展示需要核对的重点。" />
         ) : (
           <div className="space-y-3">
             {effectiveResult.suggestions.map((suggestion) => (
-              <div key={suggestion} className="rounded border border-[var(--border)] bg-white p-3 text-sm leading-6">
+              <div key={suggestion} className="rounded-lg border border-[var(--border)] bg-white p-4 text-sm leading-6">
                 {suggestion}
               </div>
             ))}

@@ -1,3 +1,5 @@
+import type { ResumeQualityAssessment } from "./resume-quality";
+
 export type Project = {
   id: string;
   name: string;
@@ -23,6 +25,7 @@ export type Project = {
   recognizedProjectFields?: RecognizedProjectFields;
   confirmedProjectFields?: ConfirmedProjectFields;
   isProjectFieldsConfirmed?: boolean;
+  resumeQualityAssessment?: ResumeQualityAssessment;
 };
 
 export type RecognizedProjectFields = {

@@ -4,11 +4,11 @@ import { ResumeOptimizationPanel } from "@/components/resume/ResumeOptimizationP
 
 export default function ResumePage() {
   return (
-    <AppShell searchPlaceholder="搜索项目、简历或关键词...">
+    <AppShell searchPlaceholder="简历优化">
       <PageHeader
-        eyebrow="项目 / 简历优化"
+        eyebrow="项目表达"
         title="简历优化"
-        description="根据项目经历生成更适合产品岗位的简历表达。"
+        description="基于已确认的项目资料生成项目经历要点，并保留原始内容用于逐项核对。"
       />
       <ResumeOptimizationPanel />
     </AppShell>

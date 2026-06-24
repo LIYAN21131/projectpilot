@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Clipboard, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronRight, Clipboard, MessageSquareText, Sparkles } from "lucide-react";
 import { Button } from "@/components/common/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Toast } from "@/components/common/Toast";
@@ -24,17 +24,12 @@ function formatQuestion(question: InterviewQuestion) {
 
 function LoadingAnswerState() {
   return (
-    <div className="rounded border border-[var(--border)] bg-white p-6 text-center">
-      <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded bg-[var(--primary-soft)] text-[var(--primary)]">
-        <Sparkles size={20} />
+    <div className="rounded-lg border border-[var(--border)] bg-white p-6 text-center">
+      <div className="mx-auto mb-4 flex size-10 items-center justify-center rounded-lg border border-blue-100 bg-[var(--primary-soft)] text-[var(--primary)]">
+        <MessageSquareText size={19} />
       </div>
-      <h3 className="text-lg font-semibold">AI正在生成面试回答</h3>
-      <div className="mt-4 space-y-2 text-sm leading-6 text-[var(--text-muted)]">
-        <p>正在分析项目内容...</p>
-        <p>正在构建回答逻辑...</p>
-        <p>正在生成最终答案...</p>
-        <p>请稍候</p>
-      </div>
+      <h3 className="text-base font-semibold">正在整理回答</h3>
+      <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">系统正在结合项目资料生成回答结构，请稍候。</p>
       <div className="mx-auto mt-5 size-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--primary)]" />
     </div>
   );
@@ -42,9 +37,9 @@ function LoadingAnswerState() {
 
 function ErrorAnswerState({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="rounded border border-[var(--border)] bg-white p-6 text-center">
-      <h3 className="text-lg font-semibold">面试回答生成失败</h3>
-      <p className="mt-2 text-sm text-[var(--text-muted)]">请重试</p>
+    <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+      <h3 className="text-base font-semibold text-red-900">回答生成失败</h3>
+      <p className="mt-2 text-sm text-red-700">当前请求未完成，你可以重新生成。</p>
       <Button onClick={onRetry} className="mt-5">
         <Sparkles size={15} />
         重新生成
@@ -236,9 +231,9 @@ export function InterviewQuestionList() {
   }
 
   return (
-    <div className="grid min-h-[680px] rounded border border-[var(--border)] bg-white lg:grid-cols-[224px_minmax(0,1fr)]">
+    <div className="grid min-h-[680px] overflow-hidden rounded-lg border border-[var(--border)] bg-white lg:grid-cols-[208px_minmax(0,1fr)]">
       <aside className="overflow-x-auto border-b border-[var(--border)] bg-[var(--surface-panel)] py-4 lg:overflow-visible lg:border-b-0 lg:border-r lg:py-5">
-        <div className="px-5 pb-3 text-xs font-bold uppercase text-[var(--text-subtle)]">面试类目</div>
+        <div className="px-5 pb-3 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">问题分类</div>
         <div className="flex min-w-max lg:block lg:min-w-0">
           {categories.map((category, index) => (
             <a
@@ -247,7 +242,7 @@ export function InterviewQuestionList() {
               className={`block border-b-2 px-5 py-3 text-sm font-medium lg:border-b-0 lg:border-r-2 ${
                 index === 0
                   ? "border-[var(--primary)] bg-[var(--primary-soft)] text-[var(--primary)]"
-                  : "border-transparent text-[var(--text-muted)] hover:bg-white"
+                  : "border-transparent text-[var(--text-muted)] hover:bg-white hover:text-[var(--foreground)]"
               }`}
             >
               {category}
@@ -263,14 +258,14 @@ export function InterviewQuestionList() {
           <ProjectSelector projects={projects} value={effectiveProjectId} onChange={setProjectId} />
           <Button onClick={generate} disabled={isGeneratingQuestions}>
             <Sparkles size={17} />
-            {isGeneratingQuestions ? "生成中..." : "生成面试题"}
+            {isGeneratingQuestions ? "正在生成..." : "生成问题清单"}
           </Button>
         </div>
 
         {!visibleQuestions.length ? (
           <EmptyState
-            title="等待生成面试题"
-            description="生成后会展示项目背景、用户研究、产品设计、数据分析、复盘和挑战题。"
+            title="暂无面试问题"
+            description="选择项目并生成问题清单，系统会按背景、研究、设计、数据和复盘分类整理。"
           />
         ) : (
           <div className="space-y-8">
@@ -280,13 +275,13 @@ export function InterviewQuestionList() {
               return (
                 <section key={category} id={`category-${index}`}>
                   <div className="mb-4 flex items-start gap-4">
-                    <div className="flex size-11 items-center justify-center rounded bg-[var(--primary-soft)] text-[var(--primary)]">
-                      <Sparkles size={20} />
+                    <div className="flex size-10 items-center justify-center rounded-lg border border-blue-100 bg-[var(--primary-soft)] text-[var(--primary)]">
+                      <MessageSquareText size={18} />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-semibold">{category}</h2>
+                      <h2 className="text-xl font-semibold">{category}</h2>
                       <p className="mt-1 text-sm text-[var(--text-muted)]">
-                        基于当前项目内容生成可展开的回答建议。
+                        展开问题后生成回答结构，并结合真实经历进行修改。
                       </p>
                     </div>
                   </div>
@@ -298,11 +293,11 @@ export function InterviewQuestionList() {
                       const isGeneratingAnswer = answerStatus === "loading";
                       const isCopyingAnswer = copyingAnswerId === question.id;
                       return (
-                        <article key={question.id} className="rounded border border-[var(--border)] bg-white">
+                        <article key={question.id} className="overflow-hidden rounded-lg border border-[var(--border)] bg-white">
                           <button
                             onClick={() => openQuestion(question, open)}
                             disabled={isGeneratingAnswer}
-                            className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left"
+                            className="flex w-full items-start justify-between gap-4 px-4 py-3.5 text-left transition-colors hover:bg-[var(--surface-panel)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-blue-600/15"
                           >
                             <span className="flex min-w-0 flex-wrap items-center gap-3 text-sm font-semibold">
                               <span className="rounded border border-[var(--border)] px-2 py-1 font-mono text-xs text-[var(--text-muted)]">
@@ -328,7 +323,7 @@ export function InterviewQuestionList() {
 
                               {answerStatus === "success" ? (
                                 <>
-                                  <div className="mb-5 rounded border border-[var(--border)] bg-white p-4">
+                                  <div className="mb-5 rounded-lg border border-[var(--border)] bg-white p-4">
                                     <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                       <h3 className="font-semibold">面试回答示例</h3>
                                       <div className="flex flex-wrap gap-2">
@@ -347,8 +342,8 @@ export function InterviewQuestionList() {
                                     </p>
                                   </div>
                                   <div className="mb-4 flex items-center justify-between">
-                                    <span className="inline-flex rounded bg-white px-2 py-1 text-xs font-medium text-[var(--primary)]">
-                                      STAR回答结构
+                                    <span className="inline-flex rounded-md border border-blue-100 bg-[var(--primary-soft)] px-2 py-1 text-xs font-semibold text-[var(--primary)]">
+                                      STAR 回答结构
                                     </span>
                                   </div>
                                   <div className="grid gap-3 text-sm leading-6">

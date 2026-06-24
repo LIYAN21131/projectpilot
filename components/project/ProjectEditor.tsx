@@ -1,13 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { Clipboard, RotateCcw, Save, SendHorizontal, Sparkles } from "lucide-react";
+import { Clipboard, RotateCcw, Save, SendHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/Button";
 import { EmptyState } from "@/components/common/EmptyState";
 import { Input, Select, Textarea } from "@/components/common/Field";
 import { Toast } from "@/components/common/Toast";
-import { optimizeResumeBulletsWithAI, prepareInterviewWithAI } from "@/lib/ai/client";
+import {
+  optimizeResumeBulletsWithAI,
+  prepareInterviewWithAI,
+  scoreOptimizedResumeQualityWithAI,
+  scoreOriginalResumeQualityWithAI,
+} from "@/lib/ai/client";
+import {
+  ResumeQualityComparison,
+  type ResumeQualityViewState,
+} from "@/components/resume/ResumeQualityComparison";
+import {
+  createBeforeResumeQualityFingerprint,
+  createComparisonResumeQualityFingerprint,
+} from "@/lib/resume-quality/fingerprint";
+import { markResumeQualityAssessmentStale } from "@/lib/resume-quality/state";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
 import type {
   InterviewPreparationItem,
@@ -17,6 +31,10 @@ import type {
   RecognitionStatus,
   ResumeProjectFields,
 } from "@/types/project";
+import type {
+  ResumeQualityAssessment,
+  ResumeQualityScore,
+} from "@/types/resume-quality";
 
 const PROJECTS_KEY = "projectpilot.projects";
 const AUTO_SAVE_DELAY = 800;
@@ -202,6 +220,19 @@ function resumeFieldsFromProject(project: Project): ResumeProjectFields {
   };
 }
 
+function editableResumeFieldsFromProject(project: Project): ResumeProjectFields {
+  return {
+    projectName: project.name || "",
+    background: project.background || project.summary || "",
+    painPoint: project.painPoints || "",
+    responsibility: project.responsibilities || "",
+    actions: project.solution || "",
+    result: project.results || "",
+    metrics: project.metrics || "",
+    tools: project.tools || "",
+  };
+}
+
 function confirmedFieldsFromProject(project: Project) {
   return {
     projectName: project.name || "",
@@ -269,6 +300,8 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
   const [resumeOptimizeState, setResumeOptimizeState] = useState<ResumeOptimizeState>("idle");
   const [copyState, setCopyState] = useState<CopyState>("idle");
   const [resumeSaveState, setResumeSaveState] = useState<ResumeSaveState>("idle");
+  const [resumeQualityAssessment, setResumeQualityAssessment] = useState<ResumeQualityAssessment>();
+  const [resumeQualityState, setResumeQualityState] = useState<ResumeQualityViewState>("idle");
   const [interviewItems, setInterviewItems] = useState<InterviewPreparationItem[]>([]);
   const [interviewPrepareState, setInterviewPrepareState] = useState<InterviewPrepareState>("idle");
   const [copiedScriptIndex, setCopiedScriptIndex] = useState<number | null>(null);
@@ -299,6 +332,14 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
         : saveState === "saved"
           ? `已自动保存${lastSavedAt ? ` ${formatShortTime(lastSavedAt)}` : ""}`
           : "尚未保存");
+  const currentQualityFields = editableResumeFieldsFromProject(draft);
+  const expectedResumeQualityFingerprint = resumeQualityAssessment?.after && resumeBullets.length
+    ? createComparisonResumeQualityFingerprint(currentQualityFields, resumeBullets, targetRole)
+    : createBeforeResumeQualityFingerprint(currentQualityFields, targetRole);
+  const resumeQualityAssessmentForDisplay = markResumeQualityAssessmentStale(
+    resumeQualityAssessment,
+    expectedResumeQualityFingerprint,
+  );
 
   const visibleSections = useMemo(() => {
     return sectionDefinitions.filter((section) => {
@@ -400,6 +441,30 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
     targetRole,
   ]);
 
+  const persistResumeQualityAssessment = useCallback((assessment: ResumeQualityAssessment) => {
+    const current = safeReadProjects();
+    if (!current.ok) return false;
+
+    const nextProjects = current.projects.map((project) => (
+      project.id === draft.id
+        ? { ...project, resumeQualityAssessment: assessment }
+        : project
+    ));
+    if (!nextProjects.some((project) => project.id === draft.id)) {
+      return false;
+    }
+    if (!safeWriteProjects(nextProjects)) {
+      return false;
+    }
+
+    setProjects(nextProjects);
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      resumeQualityAssessment: assessment,
+    }));
+    return true;
+  }, [draft.id, setProjects]);
+
   useEffect(() => {
     if (!hydrated) return;
 
@@ -430,6 +495,8 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
         setResumeOptimizeState(restoredProject.optimizedResumeBullets?.length ? "success" : "idle");
         setCopyState("idle");
         setResumeSaveState(restoredProject.optimizedResumeBullets?.length ? "saved" : "idle");
+        setResumeQualityAssessment(restoredProject.resumeQualityAssessment);
+        setResumeQualityState(restoredProject.resumeQualityAssessment?.before ? "ready" : "idle");
         setInterviewItems(restoredProject.interviewPreparations ?? []);
         setInterviewPrepareState(restoredProject.interviewPreparations?.length ? "success" : "idle");
         setCopiedScriptIndex(null);
@@ -472,6 +539,8 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       setResumeOptimizeState("idle");
       setCopyState("idle");
       setResumeSaveState("idle");
+      setResumeQualityAssessment(undefined);
+      setResumeQualityState("idle");
       setInterviewItems([]);
       setInterviewPrepareState("idle");
       setCopiedScriptIndex(null);
@@ -650,7 +719,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       userEditedRef.current = true;
       setSaveState("idle");
       setIsRecognizing(false);
-      setToastMessage("AI 已识别项目资料，请检查内容，确认无误后点击“确认保存识别结果”。");
+      setToastMessage("资料已整理，请检查内容，确认无误后保存识别结果。");
       scrollToSection("project-info");
       window.setTimeout(() => setToastMessage(""), 3600);
     } catch (error) {
@@ -681,12 +750,107 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
     }
   }
 
+  async function requestBeforeResumeQualityScore(fields: ResumeProjectFields) {
+    setResumeQualityState("loading-before");
+
+    try {
+      const score = await scoreOriginalResumeQualityWithAI(fields, targetRole);
+      const now = new Date().toISOString();
+      const fingerprint = createBeforeResumeQualityFingerprint(fields, targetRole);
+      const assessment: ResumeQualityAssessment = {
+        version: 1,
+        rubricVersion: 1,
+        targetRole,
+        before: score,
+        status: "current",
+        beforeFingerprint: fingerprint,
+        sourceFingerprint: fingerprint,
+        createdAt: resumeQualityAssessment?.createdAt ?? now,
+        updatedAt: now,
+      };
+
+      setResumeQualityAssessment(assessment);
+      setResumeQualityState("ready");
+      if (!persistResumeQualityAssessment(assessment)) {
+        setToastMessage("原始评分已生成，但暂未保存，请稍后重试。");
+        window.setTimeout(() => setToastMessage(""), 2600);
+      }
+      return score;
+    } catch {
+      setResumeQualityState("error-before");
+      return undefined;
+    }
+  }
+
+  async function requestAfterResumeQualityScore(
+    fields: ResumeProjectFields,
+    bullets: string[],
+  ) {
+    setResumeQualityState("loading-after");
+    const expectedBeforeFingerprint = createBeforeResumeQualityFingerprint(fields, targetRole);
+    let before: ResumeQualityScore | undefined =
+      resumeQualityAssessment?.beforeFingerprint === expectedBeforeFingerprint
+        ? resumeQualityAssessment.before
+        : undefined;
+
+    if (!before) {
+      try {
+        before = await scoreOriginalResumeQualityWithAI(fields, targetRole);
+        if (!resumeQualityAssessment?.before) {
+          const now = new Date().toISOString();
+          setResumeQualityAssessment({
+            version: 1,
+            rubricVersion: 1,
+            targetRole,
+            before,
+            status: "current",
+            beforeFingerprint: expectedBeforeFingerprint,
+            sourceFingerprint: expectedBeforeFingerprint,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      } catch {
+        setResumeQualityState(
+          resumeQualityAssessment?.before ? "error-after" : "error-before",
+        );
+        return;
+      }
+    }
+
+    try {
+      const response = await scoreOptimizedResumeQualityWithAI(
+        fields,
+        bullets,
+        before,
+        targetRole,
+      );
+      const now = new Date().toISOString();
+      setResumeQualityAssessment({
+        version: 1,
+        rubricVersion: 1,
+        targetRole,
+        before,
+        after: response.score,
+        comparison: response.comparison,
+        status: "current",
+        beforeFingerprint: expectedBeforeFingerprint,
+        sourceFingerprint: createComparisonResumeQualityFingerprint(fields, bullets, targetRole),
+        createdAt: resumeQualityAssessment?.createdAt ?? now,
+        updatedAt: now,
+      });
+      setResumeQualityState("ready");
+    } catch {
+      setResumeQualityState("error-after");
+    }
+  }
+
   function confirmRecognitionResult() {
     if (saveState === "saving") return;
 
     const confirmedAt = new Date().toISOString();
     const sanitizedDraft = { ...draft, targetUsers: sanitizeTargetUsers(draft.targetUsers) };
-    const confirmedFields = resumeFieldsFromProject(sanitizedDraft);
+    const confirmedFields = editableResumeFieldsFromProject(sanitizedDraft);
     const confirmedProjectFields = confirmedFieldsFromProject(sanitizedDraft);
     setRecognitionStatus("confirmed");
     setRecognitionConfirmedAt(confirmedAt);
@@ -708,6 +872,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       userEditedRef.current = false;
       setToastMessage("识别结果已确认保存，可以继续进行简历优化和面试准备。");
       window.setTimeout(() => setToastMessage(""), 3000);
+      void requestBeforeResumeQualityScore(confirmedFields);
     }
   }
 
@@ -741,6 +906,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       setCopyState("idle");
       setToastMessage("优化完成");
       window.setTimeout(() => setToastMessage(""), 2400);
+      void requestAfterResumeQualityScore(fields, bullets);
     } catch {
       setResumeOptimizeState("error");
       setToastMessage("网络或模型服务异常，请稍后重试");
@@ -778,6 +944,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
         originalResumeText: rawMaterial,
         confirmedResumeFields: confirmedFields,
         optimizedResumeBullets: resumeBullets,
+        resumeQualityAssessment: resumeQualityAssessmentForDisplay,
       },
     )) {
       userEditedRef.current = false;
@@ -785,6 +952,15 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       setToastMessage("已保存到项目中");
       window.setTimeout(() => setToastMessage(""), 2400);
     }
+  }
+
+  function retryBeforeResumeQualityScore() {
+    void requestBeforeResumeQualityScore(resumeFieldsFromProject(draft));
+  }
+
+  function retryAfterResumeQualityScore() {
+    if (!resumeBullets.length) return;
+    void requestAfterResumeQualityScore(resumeFieldsFromProject(draft), resumeBullets);
   }
 
   async function generateInterviewPreparation() {
@@ -909,12 +1085,12 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       <Toast message={toastMessage} />
 
       <div className="grid gap-6 lg:grid-cols-[224px_minmax(0,1fr)] lg:gap-8">
-        <aside className="h-fit overflow-x-auto border-b border-[var(--border)] bg-[var(--surface-panel)] py-3 lg:sticky lg:top-24 lg:overflow-visible lg:border-b-0 lg:border-r lg:py-4">
+        <aside className="h-fit overflow-x-auto rounded-lg border border-[var(--border)] bg-white py-2 lg:sticky lg:top-24 lg:overflow-visible lg:py-3">
           <nav className="flex min-w-max lg:block lg:min-w-0">
             <Link
               href="/projects"
               onClick={saveBeforeReturn}
-              className="block border-b-2 border-transparent px-4 py-2 text-left text-sm font-medium text-[var(--primary)] transition lg:w-full lg:border-b-0 lg:border-r-2"
+              className="block border-b-2 border-transparent px-4 py-2.5 text-left text-sm font-semibold text-[var(--primary)] transition-colors hover:bg-[var(--surface-panel)] lg:w-full lg:border-b-0 lg:border-r-2"
             >
               返回项目档案
             </Link>
@@ -926,10 +1102,10 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                   userEditedRef.current = true;
                   scrollToSection(section.id);
                 }}
-                className={`block border-b-2 border-transparent px-4 py-2 text-left text-sm transition lg:w-full lg:border-b-0 lg:border-r-2 ${
+                className={`block border-b-2 border-transparent px-4 py-2.5 text-left text-sm transition-colors lg:w-full lg:border-b-0 lg:border-r-2 ${
                   activeSection === section.id
-                    ? "border-[var(--primary)] bg-white font-medium text-[var(--foreground)]"
-                    : "text-[var(--text-muted)] hover:border-[var(--primary)] hover:bg-white"
+                    ? "border-[var(--primary)] bg-[var(--primary-soft)] font-semibold text-[var(--primary)]"
+                    : "text-[var(--text-muted)] hover:bg-[var(--surface-panel)] hover:text-[var(--foreground)]"
                 }`}
               >
                 {section.label}
@@ -944,15 +1120,15 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
         </aside>
 
         <section className="min-w-0 space-y-6">
-          <div className="flex flex-col gap-4 border-b border-[var(--border)] pb-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 border-b border-[var(--border)] pb-6 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-3">
-                <h1 className="text-3xl font-semibold tracking-tight">编辑项目档案</h1>
-                <span className="rounded bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">编辑项目档案</h1>
+                <span className="rounded-md border border-[var(--border-soft)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
                   {projectStatus}
                 </span>
               </div>
-              <div className={`mt-3 rounded border px-3 py-2 text-sm ${
+              <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
                 saveState === "error"
                   ? "border-red-200 bg-red-50 text-red-700"
                   : "border-[var(--border)] bg-[var(--surface-panel)] text-[var(--text-muted)]"
@@ -962,11 +1138,12 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
             </div>
           </div>
 
-          <section id="material-import" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+          <section id="material-import" className="scroll-mt-24 rounded-lg border border-[var(--border)] bg-white p-5 sm:p-6">
             <div className="mb-5">
-              <h2 className="text-xl font-semibold">资料导入</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">步骤 1</p>
+              <h2 className="mt-1 text-xl font-semibold">导入项目资料</h2>
               <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
-                粘贴你的原始项目经历、简历片段、项目复盘或作品介绍，系统会识别并整理为结构化项目资料。
+                粘贴项目经历、简历片段、复盘或作品介绍，系统会整理为可编辑的结构化内容。
               </p>
             </div>
             <Textarea
@@ -979,23 +1156,24 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
             <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-[var(--text-subtle)]">已输入 {rawMaterial.length} 字</p>
               <Button onClick={recognizeProject} disabled={isRecognizing}>
-                <Sparkles size={16} />
-                {isRecognizing ? "识别中..." : "AI识别项目资料"}
+                <SendHorizontal size={16} />
+                {isRecognizing ? "正在整理..." : "识别并整理"}
               </Button>
             </div>
           </section>
 
-          <section id="project-info" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+          <section id="project-info" className="scroll-mt-24 rounded-lg border border-[var(--border)] bg-white p-5 sm:p-6">
             <div className="mb-5">
-              <h2 className="text-xl font-semibold">项目资料</h2>
-              <p className="mt-1 text-sm text-[var(--text-muted)]">识别后的结构化内容会填入这里，你也可以继续手动编辑。</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">步骤 2</p>
+              <h2 className="mt-1 text-xl font-semibold">检查项目资料</h2>
+              <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">核对系统整理的字段，并补充缺失或不准确的信息。</p>
             </div>
 
             {isRecognitionPending ? (
-              <div className="mb-5 rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+              <div className="mb-5 rounded-lg border border-blue-200 bg-blue-50 p-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--foreground)]">AI 已识别项目资料，当前状态：待确认</p>
+                    <p className="text-sm font-semibold text-blue-950">资料已整理，等待确认</p>
                     <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
                       请检查并修改下方内容，确认无误后点击“确认保存识别结果”。确认前，简历优化和面试准备不会解锁。
                     </p>
@@ -1006,8 +1184,8 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                       确认保存识别结果
                     </Button>
                     <Button variant="secondary" onClick={recognizeProject} disabled={isRecognizing}>
-                      <Sparkles size={16} />
-                      {isRecognizing ? "识别中..." : "重新识别"}
+                      <RotateCcw size={16} />
+                      {isRecognizing ? "正在整理..." : "重新整理"}
                     </Button>
                   </div>
                 </div>
@@ -1015,7 +1193,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
             ) : null}
 
             {recognitionStatus === "confirmed" ? (
-              <div className="mb-5 rounded border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">
+              <div className="mb-5 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
                 识别结果已确认保存，可以继续进行后续操作。
               </div>
             ) : null}
@@ -1046,7 +1224,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-semibold">最近编辑时间</label>
-                    <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">
+                    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] px-3 py-2 text-sm text-[var(--text-muted)]">
                       {formatTime(draft.updatedAt)}
                     </div>
                   </div>
@@ -1113,10 +1291,11 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
           </section>
 
           {isNextFlowUnlocked ? (
-          <section id="resume-optimization" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+          <section id="resume-optimization" className="scroll-mt-24 rounded-lg border border-[var(--border)] bg-white p-5 sm:p-6">
             <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold">简历优化</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">步骤 3</p>
+                <h2 className="mt-1 text-xl font-semibold">生成简历表述</h2>
                 <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
                   基于已确认的项目资料生成 3-5 条可直接放入简历的项目 bullet。
                 </p>
@@ -1134,7 +1313,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
             </div>
 
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
-              <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] p-4">
                 <h3 className="mb-3 text-base font-semibold">已确认结构化内容</h3>
                 <div className="max-h-[460px] space-y-3 overflow-y-auto pr-1">
                   {[
@@ -1147,7 +1326,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                     ["数据指标", draft.metrics],
                     ["使用工具", draft.tools || ""],
                   ].map(([label, value]) => (
-                    <div key={label} className="rounded border border-[var(--border)] bg-white p-3">
+                    <div key={label} className="rounded-lg border border-[var(--border)] bg-white p-3">
                       <p className="text-xs font-medium text-[var(--text-subtle)]">{label}</p>
                       <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--foreground)]">
                         {value || "待补充"}
@@ -1157,7 +1336,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 </div>
               </div>
 
-              <div className="rounded border border-[var(--border)] p-4">
+              <div className="rounded-lg border border-[var(--border)] p-4">
                 <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-base font-semibold">简历优化结果</h3>
                   <div className="flex flex-wrap gap-2">
@@ -1172,7 +1351,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                   </div>
                 </div>
 
-                <div className="max-h-[360px] overflow-y-auto rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                <div className="max-h-[360px] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] p-4">
                   {resumeBullets.length ? (
                     <ul className="list-disc space-y-3 pl-5 text-sm text-[var(--foreground)]">
                       {resumeBullets.map((bullet, index) => (
@@ -1196,14 +1375,22 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 </div>
               </div>
             </div>
+
+            <ResumeQualityComparison
+              assessment={resumeQualityAssessmentForDisplay}
+              state={resumeQualityState}
+              onRetryBefore={retryBeforeResumeQualityScore}
+              onRetryAfter={retryAfterResumeQualityScore}
+            />
           </section>
           ) : null}
 
           {isNextFlowUnlocked ? (
-          <section id="interview-preparation" className="scroll-mt-24 rounded border border-[var(--border)] bg-white p-6">
+          <section id="interview-preparation" className="scroll-mt-24 rounded-lg border border-[var(--border)] bg-white p-5 sm:p-6">
             <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <h2 className="text-xl font-semibold">面试准备</h2>
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">步骤 4</p>
+                <h2 className="mt-1 text-xl font-semibold">准备面试追问</h2>
                 <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
                   基于当前项目资料和简历优化结果，生成面试追问、回答思路和可练习话术。
                 </p>
@@ -1224,7 +1411,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
               <div className="space-y-4">
                 <div className="grid gap-4 lg:grid-cols-2">
                   {interviewItems.map((item, index) => (
-                    <article key={`${item.question}-${index}`} className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+                    <article key={`${item.question}-${index}`} className="rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] p-4">
                       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <h3 className="text-base font-semibold leading-6">
                           问题 {index + 1}：{item.question}
@@ -1257,7 +1444,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
 
                         <div>
                           <p className="mb-2 font-medium text-[var(--text-muted)]">面试话术</p>
-                          <div className="max-h-36 overflow-y-auto rounded border border-[var(--border)] bg-white p-3">
+                          <div className="max-h-36 overflow-y-auto rounded-lg border border-[var(--border)] bg-white p-3">
                             <p className="break-words leading-7 text-[var(--foreground)]">{item.script}</p>
                           </div>
                         </div>
@@ -1274,7 +1461,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 </div>
               </div>
             ) : (
-              <div className="rounded border border-[var(--border)] bg-[var(--surface-panel)] p-4">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] p-4">
                 <p className="text-sm leading-6 text-[var(--text-muted)]">
                   保存项目资料后，点击“生成面试准备”生成 5 个高概率追问和练习话术。
                 </p>

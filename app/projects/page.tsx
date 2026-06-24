@@ -87,10 +87,10 @@ export default function ProjectsPage() {
   }, [hydrated, projects.length, setProjects]);
 
   return (
-    <AppShell searchPlaceholder="搜索项目档案...">
+    <AppShell searchPlaceholder="项目档案">
       <PageHeader
         title="项目档案"
-        description="管理你的项目经历，把零散资料整理成可用于简历和面试的项目表达。"
+        description="集中整理项目背景、职责、行动与结果，并在同一流程中完成简历和面试准备。"
         action={
           <Link href="/projects/edit">
             <Button>
@@ -102,28 +102,35 @@ export default function ProjectsPage() {
       />
 
       <section>
-        <h2 className="mb-4 text-xl font-semibold">我的项目</h2>
+        <div className="mb-4 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">我的项目</h2>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">
+              {projects.length ? `共 ${projects.length} 个项目档案` : "项目会保存在当前浏览器中"}
+            </p>
+          </div>
+        </div>
 
         {!hydrated ? (
           <EmptyState title="正在读取项目档案" description="本地数据加载后即可查看项目列表。" />
         ) : projects.length ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fit,minmax(300px,1fr))]">
             {projects.map((project) => (
               <article
                 key={project.id}
-                className="flex h-60 min-w-0 flex-col rounded border border-[var(--border)] bg-white p-4 transition hover:border-[var(--primary)]"
+                className="group flex min-h-64 min-w-0 flex-col rounded-lg border border-[var(--border)] bg-white p-5 transition-colors duration-200 hover:border-[#b7bcc6]"
               >
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-start justify-between gap-3">
                     <h3 className="line-clamp-2 min-w-0 break-words text-base font-semibold leading-6" title={projectTitle(project.name)}>
                       {projectTitle(project.name)}
                     </h3>
-                    <span className="shrink-0 rounded bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
+                    <span className="shrink-0 rounded-md border border-[var(--border-soft)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
                       {projectStatus(project)}
                     </span>
                   </div>
-                  <p className="mt-2 text-xs font-medium text-[var(--primary)]">
-                    求职方向：{projectTargetRole(project, fallbackTargetRole)}
+                  <p className="mt-3 text-xs font-semibold text-[var(--primary)]">
+                    {projectTargetRole(project, fallbackTargetRole)}
                   </p>
                   <p
                     className="mt-2 line-clamp-3 break-words text-sm leading-6 text-[var(--text-muted)]"
@@ -133,15 +140,15 @@ export default function ProjectsPage() {
                   </p>
                 </div>
 
-                <div className="mt-auto pt-4">
+                <div className="mt-auto border-t border-[var(--border-soft)] pt-4">
                   <p className="text-xs text-[var(--text-subtle)]">
-                    最近编辑：{new Date(project.updatedAt).toLocaleString()}
+                    更新于 {new Date(project.updatedAt).toLocaleString()}
                   </p>
-                  <div className="mt-3 flex justify-end">
+                  <div className="mt-3 flex justify-start">
                     <Link href={`/projects/edit?projectId=${encodeURIComponent(project.id)}`}>
                       <Button variant="secondary">
                         <Edit3 size={15} />
-                        管理项目
+                        继续整理
                       </Button>
                     </Link>
                   </div>

@@ -12,15 +12,17 @@ export function Button({
   ...props
 }: ButtonProps) {
   const styles = {
-    primary: "bg-[var(--primary)] text-white hover:bg-[var(--primary-strong)]",
+    primary:
+      "border border-[var(--primary)] bg-[var(--primary)] text-white shadow-sm hover:border-[var(--primary-strong)] hover:bg-[var(--primary-strong)]",
     secondary:
-      "border border-[var(--border)] bg-white text-[var(--foreground)] hover:bg-[var(--surface-muted)]",
-    ghost: "text-[var(--text-muted)] hover:bg-[var(--surface-muted)]",
+      "border border-[var(--border)] bg-white text-[var(--foreground)] shadow-sm hover:border-[#b7bcc6] hover:bg-[var(--surface-panel)]",
+    ghost:
+      "border border-transparent text-[var(--text-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]",
   };
 
   return (
     <button
-      className={`inline-flex min-h-9 items-center justify-center gap-2 rounded px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60 ${styles[variant]} ${className}`}
+      className={`inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors duration-200 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-blue-600/15 disabled:cursor-not-allowed disabled:border-[var(--border)] disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-subtle)] disabled:shadow-none disabled:opacity-100 ${styles[variant]} ${className}`}
       {...props}
     >
       {children}
