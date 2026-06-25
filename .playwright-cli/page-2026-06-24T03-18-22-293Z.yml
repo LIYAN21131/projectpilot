@@ -1,0 +1,33 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - link "项目档案" [ref=e4] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e5]
+        - generic [ref=e8]: 项目档案
+    - generic [ref=e9]:
+      - banner [ref=e10]:
+        - generic [ref=e12]:
+          - img [ref=e13]
+          - textbox "搜索项目档案..." [ref=e16]
+        - generic [ref=e17]:
+          - img [ref=e18]
+          - img [ref=e22]
+      - main [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - heading "项目档案" [level=1] [ref=e29]
+            - paragraph [ref=e30]: 管理你的项目经历，把零散资料整理成可用于简历和面试的项目表达。
+          - link "新建项目" [ref=e32] [cursor=pointer]:
+            - /url: /projects/edit
+            - button "新建项目" [ref=e33]:
+              - img [ref=e34]
+              - text: 新建项目
+        - generic [ref=e35]:
+          - heading "我的项目" [level=2] [ref=e36]
+          - generic [ref=e37]:
+            - generic [ref=e38]: —
+            - paragraph [ref=e39]: 正在读取项目档案
+            - paragraph [ref=e40]: 本地数据加载后即可查看项目列表。
+  - button "Open Next.js Dev Tools" [ref=e46] [cursor=pointer]:
+    - img [ref=e47]

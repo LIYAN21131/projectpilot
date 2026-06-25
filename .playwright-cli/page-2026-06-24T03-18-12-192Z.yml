@@ -1,0 +1,36 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "ProjectPilot" [ref=e5] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e7]
+        - generic [ref=e11]: ProjectPilot
+      - navigation [ref=e12]:
+        - link "项目档案" [ref=e13] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e14]
+          - text: 项目档案
+    - generic [ref=e17]:
+      - banner [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - img [ref=e21]
+            - textbox "搜索项目、简历或关键词..." [ref=e24]
+          - generic [ref=e25]:
+            - generic [ref=e27]: 当前项目：
+            - generic [ref=e28]: 未整理
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - img [ref=e33]
+          - img [ref=e36]
+      - main [ref=e40]:
+        - generic [ref=e42]:
+          - paragraph [ref=e43]: 项目 / 简历优化
+          - heading "简历优化" [level=1] [ref=e44]
+          - paragraph [ref=e45]: 根据项目经历生成更适合产品岗位的简历表达。
+        - generic [ref=e46]:
+          - generic [ref=e47]: —
+          - paragraph [ref=e48]: 暂无可优化的项目
+          - paragraph [ref=e49]: 请先在项目档案中保存一个项目经历，再生成简历优化建议。
+  - button "Open Next.js Dev Tools" [ref=e55] [cursor=pointer]:
+    - img [ref=e56]

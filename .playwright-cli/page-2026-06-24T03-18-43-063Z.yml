@@ -1,0 +1,26 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - link "项目档案" [ref=e4] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e5]
+        - generic [ref=e8]: 项目档案
+    - generic [ref=e9]:
+      - banner [ref=e10]:
+        - generic [ref=e12]:
+          - img [ref=e13]
+          - textbox "搜索知识点..." [ref=e16]
+        - generic [ref=e17]:
+          - img [ref=e18]
+          - img [ref=e22]
+      - main [ref=e26]:
+        - generic [ref=e28]:
+          - paragraph [ref=e29]: 项目 / 面试准备
+          - heading "面试准备 (Interview Prep)" [level=1] [ref=e30]
+          - paragraph [ref=e31]: 针对当前项目简历与档案自动生成面试知识库。
+        - generic [ref=e32]:
+          - generic [ref=e33]: —
+          - paragraph [ref=e34]: 暂无可准备面试的项目
+          - paragraph [ref=e35]: 请先在项目档案中保存一个项目经历，再生成面试题与回答建议。
+  - button "Open Next.js Dev Tools" [ref=e41] [cursor=pointer]:
+    - img [ref=e42]

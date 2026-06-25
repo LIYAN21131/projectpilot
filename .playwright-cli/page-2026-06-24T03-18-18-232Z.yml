@@ -1,0 +1,63 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "ProjectPilot" [ref=e5] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e7]
+        - generic [ref=e11]: ProjectPilot
+      - navigation [ref=e12]:
+        - link "项目档案" [ref=e13] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e14]
+          - text: 项目档案
+    - generic [ref=e17]:
+      - banner [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - img [ref=e21]
+            - textbox "搜索设置..." [ref=e24]
+          - generic [ref=e25]:
+            - generic [ref=e27]: 当前项目：
+            - generic [ref=e28]: 未整理
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - img [ref=e33]
+          - img [ref=e36]
+      - main [ref=e40]:
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e43]:
+              - img [ref=e44]
+              - button [ref=e48] [cursor=pointer]:
+                - img [ref=e49]
+            - generic [ref=e51]:
+              - heading "用户名称" [level=1] [ref=e52]
+              - paragraph [ref=e53]: 待更新职位 • 当前无候选项目
+              - generic [ref=e54]: 应聘岗位：产品经理
+          - button "更新简历" [ref=e55] [cursor=pointer]
+        - generic [ref=e56]:
+          - heading "个人信息" [level=2] [ref=e57]
+          - generic [ref=e58]:
+            - generic [ref=e59]:
+              - text: 全名
+              - textbox "全名" [ref=e60]: 用户名称
+            - generic [ref=e61]:
+              - text: 目标岗位
+              - textbox "目标岗位" [ref=e62]: 产品经理
+          - generic [ref=e63]:
+            - generic [ref=e64]:
+              - paragraph [ref=e65]: 项目数量
+              - paragraph [ref=e66]: "0"
+            - generic [ref=e67]:
+              - paragraph [ref=e68]: 简历优化次数
+              - paragraph [ref=e69]: "0"
+            - generic [ref=e70]:
+              - paragraph [ref=e71]: 面试准备次数
+              - paragraph [ref=e72]: "0"
+          - generic [ref=e74]:
+            - img [ref=e75]
+            - generic [ref=e78]:
+              - heading "API Key 设置入口" [level=3] [ref=e79]
+              - paragraph [ref=e80]: 第一版仅保留入口占位，暂不接入真实 AI API。
+  - button "Open Next.js Dev Tools" [ref=e86] [cursor=pointer]:
+    - img [ref=e87]

@@ -1,0 +1,53 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - link "项目档案" [ref=e4] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e5]
+        - generic [ref=e8]: 项目档案
+    - generic [ref=e9]:
+      - banner [ref=e10]:
+        - generic [ref=e12]:
+          - img [ref=e13]
+          - textbox "搜索设置..." [ref=e16]
+        - generic [ref=e17]:
+          - img [ref=e18]
+          - img [ref=e22]
+      - main [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - img [ref=e30]
+              - button [ref=e34] [cursor=pointer]:
+                - img [ref=e35]
+            - generic [ref=e37]:
+              - heading "用户名称" [level=1] [ref=e38]
+              - paragraph [ref=e39]: 待更新职位 • 当前无候选项目
+              - generic [ref=e40]: 应聘岗位：产品经理
+          - button "更新简历" [ref=e41] [cursor=pointer]
+        - generic [ref=e42]:
+          - heading "个人信息" [level=2] [ref=e43]
+          - generic [ref=e44]:
+            - generic [ref=e45]:
+              - text: 全名
+              - textbox "全名" [ref=e46]: 用户名称
+            - generic [ref=e47]:
+              - text: 目标岗位
+              - textbox "目标岗位" [ref=e48]: 产品经理
+          - generic [ref=e49]:
+            - generic [ref=e50]:
+              - paragraph [ref=e51]: 项目数量
+              - paragraph [ref=e52]: "0"
+            - generic [ref=e53]:
+              - paragraph [ref=e54]: 简历优化次数
+              - paragraph [ref=e55]: "0"
+            - generic [ref=e56]:
+              - paragraph [ref=e57]: 面试准备次数
+              - paragraph [ref=e58]: "0"
+          - generic [ref=e60]:
+            - img [ref=e61]
+            - generic [ref=e64]:
+              - heading "API Key 设置入口" [level=3] [ref=e65]
+              - paragraph [ref=e66]: 第一版仅保留入口占位，暂不接入真实 AI API。
+  - button "Open Next.js Dev Tools" [ref=e72] [cursor=pointer]:
+    - img [ref=e73]

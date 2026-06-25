@@ -1,0 +1,16 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e6]:
+        - img [ref=e7]
+        - textbox "搜索项目档案..." [ref=e10]
+      - generic [ref=e11]:
+        - img [ref=e12]
+        - img [ref=e16]
+    - main [ref=e20]:
+      - generic [ref=e21]:
+        - generic [ref=e22]: —
+        - paragraph [ref=e23]: 正在读取项目档案
+        - paragraph [ref=e24]: 本地数据加载后即可继续编辑。
+  - button "Open Next.js Dev Tools" [ref=e30] [cursor=pointer]:
+    - img [ref=e31]

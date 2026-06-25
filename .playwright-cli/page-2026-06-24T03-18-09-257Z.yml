@@ -1,0 +1,59 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - complementary [ref=e3]:
+      - link "ProjectPilot" [ref=e5] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e7]
+        - generic [ref=e11]: ProjectPilot
+      - navigation [ref=e12]:
+        - link "项目档案" [ref=e13] [cursor=pointer]:
+          - /url: /projects
+          - img [ref=e14]
+          - text: 项目档案
+    - generic [ref=e17]:
+      - banner [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - img [ref=e21]
+            - textbox "搜索项目资产..." [ref=e24]
+          - generic [ref=e25]:
+            - generic [ref=e27]: 当前项目：
+            - generic [ref=e28]: 未整理
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - img [ref=e33]
+          - img [ref=e36]
+      - main [ref=e40]:
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - heading "项目资产库" [level=1] [ref=e43]
+            - paragraph [ref=e44]: 管理您的设计稿、文档及其他专业资产。
+          - generic [ref=e46]:
+            - generic [ref=e47]:
+              - img [ref=e48]
+              - text: 排序
+            - generic [ref=e50]:
+              - img [ref=e51]
+              - text: 筛选
+        - generic [ref=e53]:
+          - generic [ref=e54]:
+            - textbox "资产名称" [ref=e55]
+            - combobox [ref=e56]:
+              - option "PRD" [selected]
+              - option "原型图"
+              - option "流程图"
+              - option "竞品分析"
+              - option "用户调研"
+              - option "项目截图"
+              - option "GitHub 链接"
+              - option "线上作品链接"
+            - textbox "链接或静态上传备注" [ref=e57]
+            - button "添加" [disabled] [ref=e58] [cursor=pointer]:
+              - img [ref=e59]
+              - text: 添加
+          - generic [ref=e61]:
+            - generic [ref=e62]: —
+            - paragraph [ref=e63]: 请先创建项目
+            - paragraph [ref=e64]: 资产需要关联到项目档案，第一版仅保存本地列表。
+  - button "Open Next.js Dev Tools" [ref=e70] [cursor=pointer]:
+    - img [ref=e71]

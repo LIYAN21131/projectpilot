@@ -1,0 +1,49 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - link "项目档案" [ref=e4] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e5]
+        - generic [ref=e8]: 项目档案
+    - generic [ref=e9]:
+      - banner [ref=e10]:
+        - generic [ref=e12]:
+          - img [ref=e13]
+          - textbox "搜索项目资产..." [ref=e16]
+        - generic [ref=e17]:
+          - img [ref=e18]
+          - img [ref=e22]
+      - main [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]:
+            - heading "项目资产库" [level=1] [ref=e29]
+            - paragraph [ref=e30]: 管理您的设计稿、文档及其他专业资产。
+          - generic [ref=e32]:
+            - generic [ref=e33]:
+              - img [ref=e34]
+              - text: 排序
+            - generic [ref=e36]:
+              - img [ref=e37]
+              - text: 筛选
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - textbox "资产名称" [ref=e41]
+            - combobox [ref=e42]:
+              - option "PRD" [selected]
+              - option "原型图"
+              - option "流程图"
+              - option "竞品分析"
+              - option "用户调研"
+              - option "项目截图"
+              - option "GitHub 链接"
+              - option "线上作品链接"
+            - textbox "链接或静态上传备注" [ref=e43]
+            - button "添加" [disabled] [ref=e44] [cursor=pointer]:
+              - img [ref=e45]
+              - text: 添加
+          - generic [ref=e47]:
+            - generic [ref=e48]: —
+            - paragraph [ref=e49]: 请先创建项目
+            - paragraph [ref=e50]: 资产需要关联到项目档案，第一版仅保存本地列表。
+  - button "Open Next.js Dev Tools" [ref=e56] [cursor=pointer]:
+    - img [ref=e57]
