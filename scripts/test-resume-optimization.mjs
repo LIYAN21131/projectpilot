@@ -9,7 +9,7 @@ const fields = {
   actions: "访谈目标用户；完成原型验证",
   result: "完成 MVP 验证",
   metrics: "邀请 8 名用户试用",
-  tools: "Figma；Next.js",
+  tools: "Figma、Next.js",
 };
 
 const facts = buildResumeFactList(fields);
