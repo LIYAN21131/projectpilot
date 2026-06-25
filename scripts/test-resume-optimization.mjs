@@ -195,11 +195,15 @@ assert.match(evaluationPrompt, /提示词版本：2/);
 assert.match(evaluationPrompt, /评分量表版本：2/);
 assert.match(
   evaluationPrompt,
-  /completeness：必要的背景或目标、个人责任、关键行动和结果/,
+  /completeness：是否包含必要的背景或目标、个人职责、关键行动和结果/,
 );
 assert.match(
   evaluationPrompt,
-  /evidence：清晰的定量或定性结果，以及行动与结果之间的关联；仅缺少量化指标不代表低质量；绝不编造指标/,
+  /evidence：是否存在清楚的定量或定性结果，以及结果与行动之间的关联/,
+);
+assert.match(
+  evaluationPrompt,
+  /仅缺少量化指标不代表低质量；可信的定性结果也可获得合理分数；不得编造指标/,
 );
 assert.match(
   evaluationPrompt,
@@ -207,11 +211,11 @@ assert.match(
 );
 assert.match(
   evaluationPrompt,
-  /roleFit：突出目标岗位能力和用户实际贡献/,
+  /roleFit：是否突出目标岗位所需能力和用户实际承担的贡献/,
 );
 assert.match(
   evaluationPrompt,
-  /professionalism：简洁、具体、专业；避免重复、含糊和夸大/,
+  /professionalism：是否简洁、具体、专业，避免重复、空泛和过度夸大/,
 );
 assert.match(
   evaluationPrompt,
