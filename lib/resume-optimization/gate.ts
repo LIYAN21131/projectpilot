@@ -82,39 +82,29 @@ function rejectionReasons(
   const unknownMissingId = candidate.missingCoreFactIds.some(
     (id) => !factsById.has(id),
   );
+  const reasons: ResumeCandidateRejectionReason[] = [];
   if (unknownMissingId) {
-    return {
-      reasons: ["invalid_candidate"] as ResumeCandidateRejectionReason[],
-      changes: buildChanges(originalExpression, candidate.expression),
-      total: contentTotal + candidate.expression.total,
-    };
+    reasons.push("invalid_candidate");
   }
-
-  const factualReasons: ResumeCandidateRejectionReason[] = [];
   if (candidate.introducedFacts.length > 0) {
-    factualReasons.push("introduced_fact");
+    reasons.push("introduced_fact");
   }
-  if (candidate.missingCoreFactIds.length > 0) {
-    factualReasons.push("missing_core_fact");
+  if (candidate.missingCoreFactIds.length > 0 && !unknownMissingId) {
+    reasons.push("missing_core_fact");
   }
 
   const total = contentTotal + candidate.expression.total;
   const changes = buildChanges(originalExpression, candidate.expression);
-  if (factualReasons.length > 0) {
-    return { reasons: factualReasons, changes, total };
-  }
-
-  const scoreReasons: ResumeCandidateRejectionReason[] = [];
   if (total < originalTotal) {
-    scoreReasons.push("total_score_decreased");
+    reasons.push("total_score_decreased");
   }
   if (!changes.some(({ change }) => change >= 1)) {
-    scoreReasons.push("no_expression_improvement");
+    reasons.push("no_expression_improvement");
   }
   if (changes.some(({ change }) => change < -2)) {
-    scoreReasons.push("dimension_regressed");
+    reasons.push("dimension_regressed");
   }
-  return { reasons: scoreReasons, changes, total };
+  return { reasons, changes, total };
 }
 
 function createBaseAssessment(
@@ -152,9 +142,7 @@ function compareQualified(left: QualifiedCandidate, right: QualifiedCandidate) {
     scoreFor(right.evaluation.expression, "roleFit").score -
       scoreFor(left.evaluation.expression, "roleFit").score ||
     scoreFor(right.evaluation.expression, "professionalism").score -
-      scoreFor(left.evaluation.expression, "professionalism").score ||
-    scoreFor(right.evaluation.expression, "logic").score -
-      scoreFor(left.evaluation.expression, "logic").score
+      scoreFor(left.evaluation.expression, "professionalism").score
   );
 }
 
@@ -224,9 +212,19 @@ export function selectResumeOptimization(
   }
 
   const base = createBaseAssessment(input, rejectionCounts, []);
+  const contentRelatedRejectionCount =
+    (rejectionCounts.missing_core_fact ?? 0) +
+    (rejectionCounts.total_score_decreased ?? 0) +
+    (rejectionCounts.no_expression_improvement ?? 0) +
+    (rejectionCounts.dimension_regressed ?? 0);
+  const everyCandidateInvalid =
+    (rejectionCounts.invalid_candidate ?? 0) ===
+    input.evaluation.candidates.length;
   const needsInformation =
     input.evaluation.content.dimensions.some(({ score }) => score <= 12) &&
-    input.evaluation.contentGaps.length > 0;
+    input.evaluation.contentGaps.length > 0 &&
+    contentRelatedRejectionCount > 0 &&
+    !everyCandidateInvalid;
   if (needsInformation) {
     return {
       status: "needs-information",

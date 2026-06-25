@@ -439,7 +439,7 @@ const professionalismTie = select({
 assert.equal(professionalismTie.status, "optimized");
 assert.deepEqual(professionalismTie.bullets, generation.candidates[1].bullets);
 
-const completeTie = select({
+const stableOrderTie = select({
   normalizedEvaluation: normalizedForGate({
     candidateScores: {
       structure: { logic: 16, roleFit: 15, professionalism: 14 },
@@ -448,8 +448,8 @@ const completeTie = select({
     },
   }),
 });
-assert.equal(completeTie.status, "optimized");
-assert.deepEqual(completeTie.bullets, generation.candidates[0].bullets);
+assert.equal(stableOrderTie.status, "optimized");
+assert.deepEqual(stableOrderTie.bullets, generation.candidates[0].bullets);
 
 const equalTotalAllowed = select({
   normalizedEvaluation: normalizedForGate({
@@ -505,6 +505,32 @@ const minusThreeRejected = select({
 assert.equal(minusThreeRejected.status, "no-improvement");
 assert.equal(minusThreeRejected.assessment.rejectionCounts.dimension_regressed, 1);
 
+const accumulatedRejections = select({
+  normalizedEvaluation: normalizedForGate({
+    candidateScores: {
+      structure: { logic: 15, roleFit: 15, professionalism: 13 },
+      "role-fit": { logic: 13, roleFit: 10, professionalism: 13 },
+      "outcome-focused": { logic: 12, roleFit: 13, professionalism: 13 },
+    },
+    introducedFacts: {
+      "role-fit": ["新增上线事实"],
+    },
+  }),
+});
+assert.equal(accumulatedRejections.status, "optimized");
+assert.equal(
+  accumulatedRejections.assessment.rejectionCounts.introduced_fact,
+  1,
+);
+assert.equal(
+  accumulatedRejections.assessment.rejectionCounts.total_score_decreased,
+  1,
+);
+assert.equal(
+  accumulatedRejections.assessment.rejectionCounts.dimension_regressed,
+  1,
+);
+
 const allFlatRejected = select({
   normalizedEvaluation: normalizedForGate({
     candidateScores: Object.fromEntries(
@@ -542,6 +568,70 @@ assert.deepEqual(sparseFallback.assessment.suggestions, [
 ]);
 assert.deepEqual(sparseFallback.assessment.expressionChanges, []);
 assert.deepEqual(sparseFallback.assessment.highlights, []);
+
+const allInvalidFallback = select({
+  normalizedEvaluation: normalizedForGate({
+    contentScores: { completeness: 10, evidence: 9 },
+    candidateScores: Object.fromEntries(
+      styles.map((style) => [
+        style,
+        { logic: 15, roleFit: 15, professionalism: 13 },
+      ]),
+    ),
+    missingCoreFactIds: Object.fromEntries(
+      styles.map((style) => [style, [`unknown-${style}`]]),
+    ),
+    contentGaps: ["补充结果证据"],
+  }),
+});
+assert.equal(allInvalidFallback.status, "no-improvement");
+assert.equal(
+  allInvalidFallback.assessment.rejectionCounts.invalid_candidate,
+  3,
+);
+assert.deepEqual(allInvalidFallback.assessment.suggestions, []);
+
+const introducedOnlyFallback = select({
+  normalizedEvaluation: normalizedForGate({
+    contentScores: { completeness: 10, evidence: 9 },
+    candidateScores: Object.fromEntries(
+      styles.map((style) => [
+        style,
+        { logic: 15, roleFit: 15, professionalism: 13 },
+      ]),
+    ),
+    introducedFacts: Object.fromEntries(
+      styles.map((style) => [style, [`${style} 新增事实`]]),
+    ),
+    contentGaps: ["补充结果证据"],
+  }),
+});
+assert.equal(introducedOnlyFallback.status, "no-improvement");
+assert.equal(
+  introducedOnlyFallback.assessment.rejectionCounts.introduced_fact,
+  3,
+);
+assert.deepEqual(introducedOnlyFallback.assessment.suggestions, []);
+
+const contentRelatedFallback = select({
+  normalizedEvaluation: normalizedForGate({
+    contentScores: { completeness: 10, evidence: 9 },
+    candidateScores: {
+      structure: { logic: 15, roleFit: 15, professionalism: 13 },
+      "role-fit": { logic: 13, roleFit: 11, professionalism: 13 },
+      "outcome-focused": { logic: 15, roleFit: 10, professionalism: 13 },
+    },
+    missingCoreFactIds: {
+      structure: ["result-1"],
+    },
+    contentGaps: ["补充结果证据", "明确个人职责"],
+  }),
+});
+assert.equal(contentRelatedFallback.status, "needs-information");
+assert.deepEqual(contentRelatedFallback.assessment.suggestions, [
+  "补充结果证据",
+  "明确个人职责",
+]);
 
 const completeFallback = select({
   normalizedEvaluation: normalizedForGate({
