@@ -203,7 +203,7 @@ assert.match(
 );
 assert.match(
   evaluationPrompt,
-  /仅缺少量化指标不代表低质量；可信的定性结果也可获得合理分数；不得编造指标/,
+  /缺少量化数据不等于低质量。存在可信的定性结果时可以获得合理分数，但系统不得凭空补充指标。/,
 );
 assert.match(
   evaluationPrompt,
