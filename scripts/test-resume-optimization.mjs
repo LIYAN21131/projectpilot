@@ -10,7 +10,10 @@ import {
   buildCandidateGenerationPrompt,
   buildUnifiedEvaluationPrompt,
 } from "../lib/resume-optimization/prompt.ts";
-import { normalizeResumeOptimizationRequest } from "../lib/resume-optimization/service.ts";
+import {
+  executeResumeOptimization,
+  normalizeResumeOptimizationRequest,
+} from "../lib/resume-optimization/service.ts";
 
 const fields = {
   projectName: "ProjectPilot",
@@ -495,6 +498,41 @@ assert.deepEqual(evaluation.contentGaps, [
 ]);
 assert.equal(evaluation.candidates[0].expression.total, 43);
 
+const now = new Date("2026-06-25T08:00:00.000Z");
+const orchestrationCalls = [];
+/** @type {import("../lib/resume-optimization/service.ts").JsonModelCaller} */
+const fakeModelCaller = async (input) => {
+  orchestrationCalls.push(input);
+  return orchestrationCalls.length === 1
+    ? rawGeneration()
+    : rawEvaluation({
+      contentGaps: [],
+      introducedFacts: {
+        "role-fit": ["新增上线事实"],
+      },
+      missingCoreFactIds: {
+        "outcome-focused": ["result-1"],
+      },
+    });
+};
+const orchestrated = await executeResumeOptimization(
+  normalizedRequest,
+  fakeModelCaller,
+  now,
+);
+assert.equal(orchestrationCalls.length, 2);
+assert.equal(orchestrationCalls[0].temperature, 0.4);
+assert.equal(orchestrationCalls[1].temperature, 0.05);
+assert.equal(orchestrationCalls[0].prompt, generationPrompt);
+assert.match(
+  orchestrationCalls[1].prompt,
+  /梳理需求、设计流程并完成验证/,
+);
+assert.match(orchestrationCalls[1].prompt, /突出产品经理岗位能力/);
+assert.match(orchestrationCalls[1].prompt, /聚焦 MVP 验证结果/);
+assert.equal(orchestrated.status, "optimized");
+assert.deepEqual(orchestrated.bullets, generation.candidates[0].bullets);
+
 const roundedEvaluation = normalizeUnifiedEvaluation(
   rawEvaluation({
     contentScores: { completeness: 20.7, evidence: -3 },
@@ -575,8 +613,6 @@ assert.throws(
     }),
   /non-empty reason/i,
 );
-
-const now = new Date("2026-06-25T08:00:00.000Z");
 
 function select({
   normalizedGeneration = generation,
