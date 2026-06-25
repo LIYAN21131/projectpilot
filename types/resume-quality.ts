@@ -97,30 +97,56 @@ export type ResumeExpressionChange = {
   reason: string;
 };
 
-export type ResumeQualityAssessmentV2 = {
+export type ResumeCandidateRejectionReason =
+  | "introduced_fact"
+  | "missing_core_fact"
+  | "total_score_decreased"
+  | "no_expression_improvement"
+  | "dimension_regressed"
+  | "invalid_candidate";
+
+export type ResumeQualityAssessmentV2Base = {
   version: 2;
   rubricVersion: 2;
   targetRole: string;
-  outcome: "optimized" | "needs-information" | "no-improvement";
   content: ResumeContentScore;
   originalExpression: ResumeExpressionScore;
-  optimizedExpression?: ResumeExpressionScore;
   originalTotal: number;
-  optimizedTotal?: number;
   expressionChanges: ResumeExpressionChange[];
   highlights: string[];
   suggestions: string[];
-  rejectionCounts: Partial<
-    Record<
-      import("./resume-optimization").ResumeCandidateRejectionReason,
-      number
-    >
-  >;
+  rejectionCounts: Partial<Record<ResumeCandidateRejectionReason, number>>;
   status: "current" | "stale";
   sourceFingerprint: string;
   createdAt: string;
   updatedAt: string;
 };
+
+export type ResumeQualityAssessmentV2Optimized =
+  ResumeQualityAssessmentV2Base & {
+    outcome: "optimized";
+    optimizedExpression: ResumeExpressionScore;
+    optimizedTotal: number;
+  };
+
+export type ResumeQualityAssessmentV2NeedsInformation =
+  ResumeQualityAssessmentV2Base & {
+    outcome: "needs-information";
+    optimizedExpression?: never;
+    optimizedTotal?: never;
+  };
+
+export type ResumeQualityAssessmentV2NoImprovement =
+  ResumeQualityAssessmentV2Base & {
+    outcome: "no-improvement";
+    optimizedExpression?: never;
+    optimizedTotal?: never;
+  };
+
+export type ResumeQualityAssessmentV2 =
+  | ResumeQualityAssessmentV2Optimized
+  | ResumeQualityAssessmentV2NeedsInformation
+  | ResumeQualityAssessmentV2NoImprovement;
 
 export type ResumeQualityAssessment =
   | ResumeQualityAssessmentV1

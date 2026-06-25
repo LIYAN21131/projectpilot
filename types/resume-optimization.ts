@@ -2,8 +2,12 @@ import type { ResumeProjectFields } from "./project";
 import type {
   ResumeContentScore,
   ResumeExpressionScore,
-  ResumeQualityAssessmentV2,
+  ResumeQualityAssessmentV2NeedsInformation,
+  ResumeQualityAssessmentV2NoImprovement,
+  ResumeQualityAssessmentV2Optimized,
 } from "./resume-quality";
+
+export type { ResumeCandidateRejectionReason } from "./resume-quality";
 
 export type ResumeFactSource =
   | "projectName"
@@ -51,14 +55,6 @@ export type ResumeUnifiedEvaluation = {
   contentGaps: string[];
 };
 
-export type ResumeCandidateRejectionReason =
-  | "introduced_fact"
-  | "missing_core_fact"
-  | "total_score_decreased"
-  | "no_expression_improvement"
-  | "dimension_regressed"
-  | "invalid_candidate";
-
 export type ResumeOptimizationRequest = {
   fields: ResumeProjectFields;
   targetRole: string;
@@ -68,9 +64,13 @@ export type ResumeOptimizationResponse =
   | {
       status: "optimized";
       bullets: string[];
-      assessment: ResumeQualityAssessmentV2;
+      assessment: ResumeQualityAssessmentV2Optimized;
     }
   | {
-      status: "needs-information" | "no-improvement";
-      assessment: ResumeQualityAssessmentV2;
+      status: "needs-information";
+      assessment: ResumeQualityAssessmentV2NeedsInformation;
+    }
+  | {
+      status: "no-improvement";
+      assessment: ResumeQualityAssessmentV2NoImprovement;
     };

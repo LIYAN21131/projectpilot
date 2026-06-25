@@ -15,18 +15,76 @@ const fields = {
 const facts = buildResumeFactList(fields);
 
 assert.deepEqual(
-  facts.filter((fact) => fact.core).map((fact) => fact.source),
-  ["responsibility", "responsibility", "actions", "actions", "result", "metrics"],
+  facts,
+  [
+    {
+      id: "projectName-1",
+      source: "projectName",
+      text: "ProjectPilot",
+      core: false,
+    },
+    {
+      id: "background-1",
+      source: "background",
+      text: "求职者难以整理项目经历",
+      core: false,
+    },
+    {
+      id: "painPoint-1",
+      source: "painPoint",
+      text: "表达松散",
+      core: false,
+    },
+    {
+      id: "painPoint-2",
+      source: "painPoint",
+      text: "缺少岗位重点",
+      core: false,
+    },
+    {
+      id: "responsibility-1",
+      source: "responsibility",
+      text: "负责需求分析",
+      core: true,
+    },
+    {
+      id: "responsibility-2",
+      source: "responsibility",
+      text: "设计核心流程",
+      core: true,
+    },
+    {
+      id: "actions-1",
+      source: "actions",
+      text: "访谈目标用户",
+      core: true,
+    },
+    {
+      id: "actions-2",
+      source: "actions",
+      text: "完成原型验证",
+      core: true,
+    },
+    {
+      id: "result-1",
+      source: "result",
+      text: "完成 MVP 验证",
+      core: true,
+    },
+    {
+      id: "metrics-1",
+      source: "metrics",
+      text: "邀请 8 名用户试用",
+      core: true,
+    },
+    {
+      id: "tools-1",
+      source: "tools",
+      text: "Figma、Next.js",
+      core: false,
+    },
+  ],
 );
-assert.equal(
-  facts.find((fact) => fact.id === "responsibility-1")?.text,
-  "负责需求分析",
-);
-assert.equal(
-  facts.find((fact) => fact.id === "actions-2")?.text,
-  "完成原型验证",
-);
-assert.equal(facts.find((fact) => fact.source === "tools")?.core, false);
 assert.deepEqual(buildResumeFactList(fields), facts);
 
 console.log("resume optimization fact extraction passed");
