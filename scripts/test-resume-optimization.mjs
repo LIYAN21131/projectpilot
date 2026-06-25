@@ -439,17 +439,17 @@ const professionalismTie = select({
 assert.equal(professionalismTie.status, "optimized");
 assert.deepEqual(professionalismTie.bullets, generation.candidates[1].bullets);
 
-const logicTie = select({
+const completeTie = select({
   normalizedEvaluation: normalizedForGate({
     candidateScores: {
       structure: { logic: 16, roleFit: 15, professionalism: 14 },
-      "role-fit": { logic: 15, roleFit: 15, professionalism: 14 },
-      "outcome-focused": { logic: 14, roleFit: 15, professionalism: 14 },
+      "role-fit": { logic: 16, roleFit: 15, professionalism: 14 },
+      "outcome-focused": { logic: 16, roleFit: 15, professionalism: 14 },
     },
   }),
 });
-assert.equal(logicTie.status, "optimized");
-assert.deepEqual(logicTie.bullets, generation.candidates[0].bullets);
+assert.equal(completeTie.status, "optimized");
+assert.deepEqual(completeTie.bullets, generation.candidates[0].bullets);
 
 const equalTotalAllowed = select({
   normalizedEvaluation: normalizedForGate({
