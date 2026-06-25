@@ -6,6 +6,11 @@ import {
 } from "../lib/resume-optimization/normalize.ts";
 import { selectResumeOptimization } from "../lib/resume-optimization/gate.ts";
 import { createResumeOptimizationFingerprint } from "../lib/resume-optimization/fingerprint.ts";
+import {
+  buildCandidateGenerationPrompt,
+  buildUnifiedEvaluationPrompt,
+} from "../lib/resume-optimization/prompt.ts";
+import { normalizeResumeOptimizationRequest } from "../lib/resume-optimization/service.ts";
 
 const fields = {
   projectName: "ProjectPilot",
@@ -18,7 +23,157 @@ const fields = {
   tools: "Figma、Next.js",
 };
 
+const styles = ["structure", "role-fit", "outcome-focused"];
 const facts = buildResumeFactList(fields);
+
+const normalizedRequest = normalizeResumeOptimizationRequest({
+  fields: {
+    projectName: "  ProjectPilot  ",
+    background: null,
+    painPoint: 42,
+    responsibility: "  负责需求分析  ",
+    actions: undefined,
+    result: "  完成 MVP 验证  ",
+    metrics: false,
+    tools: "  Figma、Next.js  ",
+    ignored: "must not be copied",
+  },
+  targetRole: "  产品经理  ",
+});
+assert.deepEqual(normalizedRequest, {
+  fields: {
+    projectName: "ProjectPilot",
+    background: "",
+    painPoint: "",
+    responsibility: "负责需求分析",
+    actions: "",
+    result: "完成 MVP 验证",
+    metrics: "",
+    tools: "Figma、Next.js",
+  },
+  targetRole: "产品经理",
+});
+assert.throws(
+  () =>
+    normalizeResumeOptimizationRequest({
+      fields: { projectName: "ProjectPilot" },
+      targetRole: "   ",
+    }),
+  {
+    message: "Target role is required.",
+  },
+);
+assert.throws(
+  () =>
+    normalizeResumeOptimizationRequest({
+      fields: {
+        projectName: " ",
+        background: null,
+        painPoint: 1,
+      },
+      targetRole: "产品经理",
+    }),
+  {
+    message: "At least one resume field is required.",
+  },
+);
+assert.deepEqual(
+  normalizeResumeOptimizationRequest({
+    fields: {
+      projectName: " ProjectPilot ",
+    },
+    targetRole: " 产品经理 ",
+  }),
+  {
+    fields: {
+      projectName: "ProjectPilot",
+      background: "",
+      painPoint: "",
+      responsibility: "",
+      actions: "",
+      result: "",
+      metrics: "",
+      tools: "",
+    },
+    targetRole: "产品经理",
+  },
+);
+
+const promptFields = normalizedRequest.fields;
+const promptFacts = buildResumeFactList(promptFields);
+const generationPrompt = buildCandidateGenerationPrompt({
+  fields: promptFields,
+  facts: promptFacts,
+  targetRole: normalizedRequest.targetRole,
+});
+
+for (const style of styles) {
+  assert.match(generationPrompt, new RegExp(`"${style}"`));
+}
+assert.match(generationPrompt, /目标岗位：产品经理/);
+assert.match(generationPrompt, /"id":"responsibility-1"/);
+assert.match(generationPrompt, /"core":true/);
+assert.match(generationPrompt, /不得编造任何事实、数据、结果或经历/);
+assert.match(generationPrompt, /不得根据工具名称推断未确认的技能、职责或成果/);
+assert.match(generationPrompt, /不得删除或遗漏任何 core=true 的事实/);
+assert.match(generationPrompt, /每个候选必须包含 1-5 条非空 bullet/);
+assert.match(generationPrompt, /只能返回以下 JSON，不得返回 Markdown、解释或额外字段/);
+assert.match(
+  generationPrompt,
+  /"candidates":\[\{"style":"structure","bullets":\["string"\]\},\{"style":"role-fit","bullets":\["string"\]\},\{"style":"outcome-focused","bullets":\["string"\]\}\]/,
+);
+
+const promptCandidates = {
+  candidates: [
+    { style: "structure", bullets: ["结构候选实际内容"] },
+    { style: "role-fit", bullets: ["岗位匹配候选实际内容"] },
+    { style: "outcome-focused", bullets: ["成果候选实际内容"] },
+  ],
+};
+const evaluationPrompt = buildUnifiedEvaluationPrompt({
+  fields: promptFields,
+  facts: promptFacts,
+  candidates: promptCandidates,
+  targetRole: normalizedRequest.targetRole,
+});
+
+assert.match(evaluationPrompt, /必须在同一次请求中统一评估原始内容和全部三个候选/);
+assert.match(evaluationPrompt, /内容评分只能依据用户确认字段/);
+assert.match(evaluationPrompt, /completeness.*0-20/s);
+assert.match(evaluationPrompt, /evidence.*0-20/s);
+assert.match(evaluationPrompt, /logic.*0-20/s);
+assert.match(evaluationPrompt, /roleFit.*0-20/s);
+assert.match(evaluationPrompt, /professionalism.*0-20/s);
+assert.match(evaluationPrompt, /不得返回 total、总分、是否通过或 pass\/fail 决策/);
+assert.match(evaluationPrompt, /introducedFacts/);
+assert.match(evaluationPrompt, /missingCoreFactIds/);
+assert.match(evaluationPrompt, /contentGaps/);
+assert.match(evaluationPrompt, /允许候选分数低于原始表达，不得强行判定有提升/);
+assert.match(evaluationPrompt, /结构候选实际内容/);
+assert.match(evaluationPrompt, /岗位匹配候选实际内容/);
+assert.match(evaluationPrompt, /成果候选实际内容/);
+assert.match(evaluationPrompt, /只能返回以下 JSON，不得返回 Markdown、解释或额外字段/);
+assert.match(
+  evaluationPrompt,
+  /"content":\{"dimensions":\[\{"key":"completeness","score":0,"reason":"string"\},\{"key":"evidence","score":0,"reason":"string"\}\],"summary":"string"\}/,
+);
+assert.match(
+  evaluationPrompt,
+  /"originalExpression":\{"dimensions":\[\{"key":"logic","score":0,"reason":"string"\},\{"key":"roleFit","score":0,"reason":"string"\},\{"key":"professionalism","score":0,"reason":"string"\}\],"summary":"string"\}/,
+);
+for (const style of styles) {
+  assert.match(
+    evaluationPrompt,
+    new RegExp(
+      `\\{"style":"${style}","expression":\\{"dimensions":\\[\\{"key":"logic","score":0,"reason":"string"\\},\\{"key":"roleFit","score":0,"reason":"string"\\},\\{"key":"professionalism","score":0,"reason":"string"\\}\\],"summary":"string"\\},"introducedFacts":\\["string"\\],"missingCoreFactIds":\\["string"\\],"summary":"string"\\}`,
+    ),
+  );
+}
+assert.notEqual(generationPrompt, evaluationPrompt);
+assert.ok(
+  !generationPrompt.includes("结构候选实际内容"),
+  "generation prompt must not contain evaluation candidate bullets",
+);
 
 assert.deepEqual(
   facts,
@@ -92,8 +247,6 @@ assert.deepEqual(
   ],
 );
 assert.deepEqual(buildResumeFactList(fields), facts);
-
-const styles = ["structure", "role-fit", "outcome-focused"];
 
 function rawGeneration(overrides = {}) {
   return {
