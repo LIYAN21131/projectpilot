@@ -80,7 +80,10 @@ function rejectionReasons(
   originalExpression: ResumeExpressionScore,
 ) {
   const unknownMissingId = candidate.missingCoreFactIds.some(
-    (id) => !factsById.has(id),
+    (id) => !factsById.get(id)?.core,
+  );
+  const knownMissingCoreFact = candidate.missingCoreFactIds.some(
+    (id) => factsById.get(id)?.core,
   );
   const reasons: ResumeCandidateRejectionReason[] = [];
   if (unknownMissingId) {
@@ -89,7 +92,7 @@ function rejectionReasons(
   if (candidate.introducedFacts.length > 0) {
     reasons.push("introduced_fact");
   }
-  if (candidate.missingCoreFactIds.length > 0 && !unknownMissingId) {
+  if (knownMissingCoreFact) {
     reasons.push("missing_core_fact");
   }
 
@@ -159,6 +162,7 @@ export function selectResumeOptimization(
     Record<ResumeCandidateRejectionReason, number>
   > = {};
   const qualified: QualifiedCandidate[] = [];
+  let hasFactSafeContentRelatedRejection = false;
 
   for (const evaluation of input.evaluation.candidates) {
     const candidate = candidatesByStyle.get(evaluation.style);
@@ -176,6 +180,20 @@ export function selectResumeOptimization(
     );
     if (result.reasons.length > 0) {
       incrementRejections(rejectionCounts, result.reasons);
+      const isFactSafeAndStructurallyValid =
+        !result.reasons.includes("invalid_candidate") &&
+        !result.reasons.includes("introduced_fact");
+      const hasContentRelatedReason = result.reasons.some((reason) =>
+        [
+          "missing_core_fact",
+          "total_score_decreased",
+          "no_expression_improvement",
+          "dimension_regressed",
+        ].includes(reason),
+      );
+      if (isFactSafeAndStructurallyValid && hasContentRelatedReason) {
+        hasFactSafeContentRelatedRejection = true;
+      }
       continue;
     }
     qualified.push({
@@ -212,19 +230,10 @@ export function selectResumeOptimization(
   }
 
   const base = createBaseAssessment(input, rejectionCounts, []);
-  const contentRelatedRejectionCount =
-    (rejectionCounts.missing_core_fact ?? 0) +
-    (rejectionCounts.total_score_decreased ?? 0) +
-    (rejectionCounts.no_expression_improvement ?? 0) +
-    (rejectionCounts.dimension_regressed ?? 0);
-  const everyCandidateInvalid =
-    (rejectionCounts.invalid_candidate ?? 0) ===
-    input.evaluation.candidates.length;
   const needsInformation =
     input.evaluation.content.dimensions.some(({ score }) => score <= 12) &&
     input.evaluation.contentGaps.length > 0 &&
-    contentRelatedRejectionCount > 0 &&
-    !everyCandidateInvalid;
+    hasFactSafeContentRelatedRejection;
   if (needsInformation) {
     return {
       status: "needs-information",

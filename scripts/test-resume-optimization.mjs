@@ -670,6 +670,49 @@ assert.equal(
   undefined,
 );
 
+const mixedKnownAndUnknownMissingFacts = select({
+  normalizedEvaluation: normalizedForGate({
+    candidateScores: {
+      structure: { logic: 15, roleFit: 15, professionalism: 13 },
+      "role-fit": { logic: 12, roleFit: 13, professionalism: 13 },
+      "outcome-focused": { logic: 12, roleFit: 13, professionalism: 13 },
+    },
+    missingCoreFactIds: {
+      structure: ["result-1", "unknown-fact"],
+    },
+  }),
+});
+assert.equal(mixedKnownAndUnknownMissingFacts.status, "no-improvement");
+assert.equal(
+  mixedKnownAndUnknownMissingFacts.assessment.rejectionCounts.invalid_candidate,
+  1,
+);
+assert.equal(
+  mixedKnownAndUnknownMissingFacts.assessment.rejectionCounts.missing_core_fact,
+  1,
+);
+
+const mixedUnsafeFallback = select({
+  normalizedEvaluation: normalizedForGate({
+    contentScores: { completeness: 10, evidence: 9 },
+    candidateScores: {
+      structure: { logic: 10, roleFit: 10, professionalism: 10 },
+      "role-fit": { logic: 10, roleFit: 10, professionalism: 10 },
+      "outcome-focused": { logic: 15, roleFit: 15, professionalism: 13 },
+    },
+    introducedFacts: {
+      "outcome-focused": ["新增上线事实"],
+    },
+    missingCoreFactIds: {
+      structure: ["unknown-structure"],
+      "role-fit": ["unknown-role-fit"],
+    },
+    contentGaps: ["补充结果证据"],
+  }),
+});
+assert.equal(mixedUnsafeFallback.status, "no-improvement");
+assert.deepEqual(mixedUnsafeFallback.assessment.suggestions, []);
+
 const baseFingerprint = createResumeOptimizationFingerprint(
   fields,
   "产品经理",
