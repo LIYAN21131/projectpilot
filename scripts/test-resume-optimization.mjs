@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { buildResumeFactList } from "../lib/resume-optimization/facts.ts";
 import {
   normalizeCandidateGeneration,
@@ -28,6 +29,35 @@ const fields = {
 
 const styles = ["structure", "role-fit", "outcome-focused"];
 const facts = buildResumeFactList(fields);
+const aiClientSource = readFileSync(
+  new URL("../lib/ai/client.ts", import.meta.url),
+  "utf8",
+);
+const analyticsTypesSource = readFileSync(
+  new URL("../types/analytics.ts", import.meta.url),
+  "utf8",
+);
+
+assert.match(
+  aiClientSource,
+  /optimizeResumeBulletsWithAI\(\s*fields: ResumeProjectFields,\s*targetRole: string,/s,
+);
+assert.match(
+  aiClientSource,
+  /postAI<ResumeOptimizationResponse>\("\/api\/resume-optimize",\s*\{\s*fields,\s*targetRole,\s*\}/s,
+);
+assert.doesNotMatch(aiClientSource, /scoreOriginalResumeQualityWithAI/);
+assert.doesNotMatch(aiClientSource, /scoreOptimizedResumeQualityWithAI/);
+
+for (const eventName of [
+  "resume_optimization_passed",
+  "resume_optimization_safe_fallback",
+  "resume_candidate_rejected",
+  "resume_optimization_technical_error",
+  "resume_optimization_saved",
+]) {
+  assert.match(analyticsTypesSource, new RegExp(`"${eventName}"`));
+}
 
 const normalizedRequest = normalizeResumeOptimizationRequest({
   fields: {
@@ -531,6 +561,8 @@ assert.match(
 assert.match(orchestrationCalls[1].prompt, /突出产品经理岗位能力/);
 assert.match(orchestrationCalls[1].prompt, /聚焦 MVP 验证结果/);
 assert.equal(orchestrated.status, "optimized");
+assert.equal("bullets" in orchestrated, true);
+assert.equal(orchestrated.assessment.version, 2);
 assert.deepEqual(orchestrated.bullets, generation.candidates[0].bullets);
 
 const roundedEvaluation = normalizeUnifiedEvaluation(

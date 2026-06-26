@@ -1,10 +1,7 @@
 import type { InterviewQuestion, StarAnswer } from "@/types/interview";
 import type { InterviewPreparationItem, Project, ResumeProjectFields } from "@/types/project";
 import type { ResumeOptimizationResult } from "@/types/resume";
-import type {
-  ResumeQualityResponse,
-  ResumeQualityScore,
-} from "@/types/resume-quality";
+import type { ResumeOptimizationResponse } from "@/types/resume-optimization";
 import { generateInterviewQuestions } from "./generateInterviewQuestions";
 import { generateStarAnswer } from "./generateStarAnswer";
 import { optimizeResume } from "./optimizeResume";
@@ -62,51 +59,18 @@ export async function optimizeResumeWithAI(
 
 export async function optimizeResumeBulletsWithAI(
   fields: ResumeProjectFields,
-): Promise<{ bullets: string[] }> {
-  return postAI<{ bullets: string[] }>("/api/resume-optimize", fields);
+  targetRole: string,
+): Promise<ResumeOptimizationResponse> {
+  return postAI<ResumeOptimizationResponse>("/api/resume-optimize", {
+    fields,
+    targetRole,
+  });
 }
 
 export async function prepareInterviewWithAI(
   fields: ResumeProjectFields & { optimizedResumeBullets: string[] },
 ): Promise<{ questions: InterviewPreparationItem[] }> {
   return postAI<{ questions: InterviewPreparationItem[] }>("/api/interview-prepare", fields);
-}
-
-export async function scoreOriginalResumeQualityWithAI(
-  fields: ResumeProjectFields,
-  targetRole: string,
-) {
-  const response = await postAI<ResumeQualityResponse>("/api/ai/score-resume-quality", {
-    mode: "before",
-    fields,
-    targetRole,
-  });
-  if (response.mode !== "before") {
-    throw new Error("Unexpected resume quality response");
-  }
-  return response.score;
-}
-
-export async function scoreOptimizedResumeQualityWithAI(
-  fields: ResumeProjectFields,
-  optimizedBullets: string[],
-  before: ResumeQualityScore,
-  targetRole: string,
-) {
-  const response = await postAI<ResumeQualityResponse>("/api/ai/score-resume-quality", {
-    mode: "after",
-    fields,
-    optimizedBullets,
-    before,
-    targetRole,
-  });
-  if (response.mode !== "after") {
-    throw new Error("Unexpected resume quality response");
-  }
-  return {
-    score: response.score,
-    comparison: response.comparison,
-  };
 }
 
 export async function generateInterviewQuestionsWithAI(
