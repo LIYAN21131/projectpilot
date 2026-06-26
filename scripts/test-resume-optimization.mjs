@@ -15,6 +15,10 @@ import {
   executeResumeOptimization,
   normalizeResumeOptimizationRequest,
 } from "../lib/resume-optimization/service.ts";
+import {
+  describeResumeOptimizationOutcome,
+  formatResumeQualityChange,
+} from "../lib/resume-quality/presentation.ts";
 
 const fields = {
   projectName: "ProjectPilot",
@@ -29,6 +33,20 @@ const fields = {
 
 const styles = ["structure", "role-fit", "outcome-focused"];
 const facts = buildResumeFactList(fields);
+assert.equal(formatResumeQualityChange(3), "+3");
+assert.equal(formatResumeQualityChange(0), "0");
+assert.equal(
+  describeResumeOptimizationOutcome("optimized"),
+  "已通过质量门槛",
+);
+assert.equal(
+  describeResumeOptimizationOutcome("needs-information"),
+  "建议补充信息后重试",
+);
+assert.equal(
+  describeResumeOptimizationOutcome("no-improvement"),
+  "当前版本暂不建议替换",
+);
 const aiClientSource = readFileSync(
   new URL("../lib/ai/client.ts", import.meta.url),
   "utf8",
