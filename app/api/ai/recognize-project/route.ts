@@ -5,6 +5,11 @@ import {
   normalizeTargetUsers,
   normalizeTargetUsersCandidates,
 } from "@/lib/ai/targetUsers";
+import {
+  getDeepSeekApiKey,
+  RECOGNITION_DEEPSEEK_FAILURE_MESSAGE,
+  RECOGNITION_MISSING_KEY_MESSAGE,
+} from "@/lib/ai/deepseekServer";
 import type { RecognizedProjectFields } from "@/types/project";
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -398,6 +403,8 @@ uncertainFields：
 export async function POST(request: Request) {
   let body: RecognizeProjectRequest;
 
+  console.info("recognize-project API invoked");
+
   try {
     body = (await request.json()) as RecognizeProjectRequest;
   } catch {
@@ -413,9 +420,9 @@ export async function POST(request: Request) {
     return jsonError("原始资料内容较少，请补充更多项目背景、职责或结果后再识别。");
   }
 
-  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const apiKey = getDeepSeekApiKey();
   if (!apiKey) {
-    return jsonError("DeepSeek API Key 未配置，请先在环境变量中配置 DEEPSEEK_API_KEY。", 500);
+    return jsonError(RECOGNITION_MISSING_KEY_MESSAGE, 500);
   }
 
   const baseUrl = normalizeBaseUrl(process.env.DEEPSEEK_BASE_URL);
@@ -468,23 +475,29 @@ export async function POST(request: Request) {
     });
 
     if (!response.ok) {
-      return jsonError("识别失败，请重试", 502);
+      console.error("DeepSeek recognition request failed", { status: response.status });
+      return jsonError(RECOGNITION_DEEPSEEK_FAILURE_MESSAGE, 502);
     }
 
     const payload = (await response.json()) as DeepSeekChatResponse;
     const content = payload.choices?.[0]?.message?.content;
 
     if (!content?.trim()) {
-      return jsonError("识别失败，请重试", 502);
+      console.error("DeepSeek recognition returned empty content");
+      return jsonError(RECOGNITION_DEEPSEEK_FAILURE_MESSAGE, 502);
     }
 
     const data = parseAIContent(content, rawMaterial);
     if (!data) {
-      return jsonError("识别失败，请重试", 502);
+      console.error("DeepSeek recognition returned unparsable content");
+      return jsonError(RECOGNITION_DEEPSEEK_FAILURE_MESSAGE, 502);
     }
 
     return NextResponse.json({ ok: true, data });
-  } catch {
-    return jsonError("识别失败，请重试", 502);
+  } catch (error) {
+    console.error("DeepSeek recognition request errored", {
+      message: error instanceof Error ? error.message : "unknown error",
+    });
+    return jsonError(RECOGNITION_DEEPSEEK_FAILURE_MESSAGE, 502);
   }
 }

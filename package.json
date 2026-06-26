@@ -10,6 +10,7 @@
     "test:parser": "node --no-warnings --experimental-strip-types scripts/test-structured-project-parser.mjs",
     "test:resume-optimization": "node --no-warnings --experimental-strip-types scripts/test-resume-optimization.mjs",
     "test:resume-quality": "node --no-warnings --experimental-strip-types scripts/test-resume-quality.mjs",
+    "test:deepseek-server": "node --no-warnings --experimental-strip-types scripts/test-deepseek-server.mjs",
     "test:project-name": "node --no-warnings --experimental-strip-types scripts/test-project-name.mjs",
     "test:target-users": "node --no-warnings --experimental-strip-types scripts/test-target-users.mjs"
   },
