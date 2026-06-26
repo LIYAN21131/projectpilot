@@ -1243,7 +1243,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">步骤 3</p>
                 <h2 className="mt-1 text-xl font-semibold">生成简历表述</h2>
                 <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
-                  Generate 3 candidates in one request and return only the version that passes fact and score gates.
+                  一次生成 3 个候选，仅返回通过事实与评分门槛的版本。
                 </p>
               </div>
               <Button onClick={optimizeResumeBullets} disabled={resumeOptimizeState === "loading"}>
