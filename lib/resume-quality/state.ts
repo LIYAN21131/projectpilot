@@ -20,3 +20,10 @@ export function markResumeQualityAssessmentStale(
     status: "stale" as const,
   };
 }
+
+export function getCurrentResumeQualityAssessment(
+  assessment: ResumeQualityAssessment | undefined,
+  expectedFingerprint: string,
+) {
+  return markResumeQualityAssessmentStale(assessment, expectedFingerprint);
+}

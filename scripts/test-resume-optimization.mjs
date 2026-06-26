@@ -19,6 +19,7 @@ import {
   describeResumeOptimizationOutcome,
   formatResumeQualityChange,
 } from "../lib/resume-quality/presentation.ts";
+import { getCurrentResumeQualityAssessment } from "../lib/resume-quality/state.ts";
 
 const fields = {
   projectName: "ProjectPilot",
@@ -713,6 +714,40 @@ assert.deepEqual(optimized.assessment.rejectionCounts, {
 assert.equal(optimized.assessment.createdAt, now.toISOString());
 assert.equal(optimized.assessment.updatedAt, now.toISOString());
 assert.match(optimized.assessment.sourceFingerprint, /^ro-v2-/);
+assert.equal(
+  getCurrentResumeQualityAssessment(
+    { ...optimized.assessment, sourceFingerprint: "same", status: "current" },
+    "same",
+  )?.status,
+  "current",
+);
+assert.equal(
+  getCurrentResumeQualityAssessment(
+    { ...optimized.assessment, sourceFingerprint: "same", status: "current" },
+    "changed",
+  )?.status,
+  "stale",
+);
+assert.equal(
+  getCurrentResumeQualityAssessment(
+    {
+      version: 1,
+      rubricVersion: 1,
+      targetRole: "浜у搧缁忕悊",
+      before: {
+        total: 60,
+        dimensions: [],
+        summary: "legacy",
+      },
+      status: "current",
+      sourceFingerprint: "same",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    },
+    "same",
+  )?.version,
+  1,
+);
 
 function normalizedForGate(options = {}) {
   return normalizeUnifiedEvaluation(
