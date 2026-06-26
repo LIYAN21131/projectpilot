@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:parser": "node --no-warnings --experimental-strip-types scripts/test-structured-project-parser.mjs",
+    "test:resume-optimization": "node --no-warnings --experimental-strip-types scripts/test-resume-optimization.mjs",
     "test:resume-quality": "node --no-warnings --experimental-strip-types scripts/test-resume-quality.mjs",
     "test:target-users": "node --no-warnings --experimental-strip-types scripts/test-target-users.mjs"
   },

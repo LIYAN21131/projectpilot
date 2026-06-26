@@ -10,18 +10,14 @@ import { Toast } from "@/components/common/Toast";
 import {
   optimizeResumeBulletsWithAI,
   prepareInterviewWithAI,
-  scoreOptimizedResumeQualityWithAI,
-  scoreOriginalResumeQualityWithAI,
 } from "@/lib/ai/client";
+import { trackEvent } from "@/lib/analytics";
 import {
   ResumeQualityComparison,
   type ResumeQualityViewState,
 } from "@/components/resume/ResumeQualityComparison";
-import {
-  createBeforeResumeQualityFingerprint,
-  createComparisonResumeQualityFingerprint,
-} from "@/lib/resume-quality/fingerprint";
-import { markResumeQualityAssessmentStale } from "@/lib/resume-quality/state";
+import { createResumeOptimizationFingerprint } from "@/lib/resume-optimization/fingerprint";
+import { getCurrentResumeQualityAssessment } from "@/lib/resume-quality/state";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
 import type {
   InterviewPreparationItem,
@@ -31,10 +27,8 @@ import type {
   RecognitionStatus,
   ResumeProjectFields,
 } from "@/types/project";
-import type {
-  ResumeQualityAssessment,
-  ResumeQualityScore,
-} from "@/types/resume-quality";
+import { isResumeQualityAssessmentV2 } from "@/types/resume-quality";
+import type { ResumeQualityAssessment } from "@/types/resume-quality";
 
 const PROJECTS_KEY = "projectpilot.projects";
 const AUTO_SAVE_DELAY = 800;
@@ -104,7 +98,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 type RecognizedProject = RecognizedProjectFields;
 
-type ResumeOptimizeState = "idle" | "loading" | "success" | "error";
+type ResumeOptimizeState = "idle" | "loading" | "success" | "safe-fallback" | "error";
 type InterviewPrepareState = "idle" | "loading" | "success" | "error";
 type CopyState = "idle" | "success" | "error";
 type ResumeSaveState = "idle" | "saved";
@@ -333,13 +327,28 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
           ? `已自动保存${lastSavedAt ? ` ${formatShortTime(lastSavedAt)}` : ""}`
           : "尚未保存");
   const currentQualityFields = editableResumeFieldsFromProject(draft);
-  const expectedResumeQualityFingerprint = resumeQualityAssessment?.after && resumeBullets.length
-    ? createComparisonResumeQualityFingerprint(currentQualityFields, resumeBullets, targetRole)
-    : createBeforeResumeQualityFingerprint(currentQualityFields, targetRole);
-  const resumeQualityAssessmentForDisplay = markResumeQualityAssessmentStale(
+  const optimizedQualityAssessment =
+    isResumeQualityAssessmentV2(resumeQualityAssessment) &&
+    resumeQualityAssessment.outcome === "optimized"
+      ? resumeQualityAssessment
+      : undefined;
+  const expectedResumeQualityFingerprint = createResumeOptimizationFingerprint(
+    currentQualityFields,
+    targetRole,
+    optimizedQualityAssessment ? resumeBullets : [],
+  );
+  const resumeQualityAssessmentForDisplay = getCurrentResumeQualityAssessment(
     resumeQualityAssessment,
     expectedResumeQualityFingerprint,
   );
+  const acceptedResumeQualityAssessment =
+    isResumeQualityAssessmentV2(resumeQualityAssessmentForDisplay) &&
+    resumeQualityAssessmentForDisplay.outcome === "optimized" &&
+    resumeQualityAssessmentForDisplay.status === "current"
+      ? resumeQualityAssessmentForDisplay
+      : undefined;
+  const canUseResumeBullets =
+    resumeBullets.length > 0 && Boolean(acceptedResumeQualityAssessment);
 
   const visibleSections = useMemo(() => {
     return sectionDefinitions.filter((section) => {
@@ -492,11 +501,18 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
         setRecognitionConfirmedAt(editorState?.recognitionConfirmedAt || "");
         setLastRecognizedAt(editorState?.lastRecognizedAt || "");
         setResumeBullets(restoredProject.optimizedResumeBullets ?? []);
-        setResumeOptimizeState(restoredProject.optimizedResumeBullets?.length ? "success" : "idle");
+        setResumeOptimizeState(
+          restoredProject.optimizedResumeBullets?.length
+            ? "success"
+            : isResumeQualityAssessmentV2(restoredProject.resumeQualityAssessment) &&
+                restoredProject.resumeQualityAssessment.outcome !== "optimized"
+              ? "safe-fallback"
+              : "idle",
+        );
         setCopyState("idle");
         setResumeSaveState(restoredProject.optimizedResumeBullets?.length ? "saved" : "idle");
         setResumeQualityAssessment(restoredProject.resumeQualityAssessment);
-        setResumeQualityState(restoredProject.resumeQualityAssessment?.before ? "ready" : "idle");
+        setResumeQualityState(restoredProject.resumeQualityAssessment ? "ready" : "idle");
         setInterviewItems(restoredProject.interviewPreparations ?? []);
         setInterviewPrepareState(restoredProject.interviewPreparations?.length ? "success" : "idle");
         setCopiedScriptIndex(null);
@@ -750,101 +766,6 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
     }
   }
 
-  async function requestBeforeResumeQualityScore(fields: ResumeProjectFields) {
-    setResumeQualityState("loading-before");
-
-    try {
-      const score = await scoreOriginalResumeQualityWithAI(fields, targetRole);
-      const now = new Date().toISOString();
-      const fingerprint = createBeforeResumeQualityFingerprint(fields, targetRole);
-      const assessment: ResumeQualityAssessment = {
-        version: 1,
-        rubricVersion: 1,
-        targetRole,
-        before: score,
-        status: "current",
-        beforeFingerprint: fingerprint,
-        sourceFingerprint: fingerprint,
-        createdAt: resumeQualityAssessment?.createdAt ?? now,
-        updatedAt: now,
-      };
-
-      setResumeQualityAssessment(assessment);
-      setResumeQualityState("ready");
-      if (!persistResumeQualityAssessment(assessment)) {
-        setToastMessage("原始评分已生成，但暂未保存，请稍后重试。");
-        window.setTimeout(() => setToastMessage(""), 2600);
-      }
-      return score;
-    } catch {
-      setResumeQualityState("error-before");
-      return undefined;
-    }
-  }
-
-  async function requestAfterResumeQualityScore(
-    fields: ResumeProjectFields,
-    bullets: string[],
-  ) {
-    setResumeQualityState("loading-after");
-    const expectedBeforeFingerprint = createBeforeResumeQualityFingerprint(fields, targetRole);
-    let before: ResumeQualityScore | undefined =
-      resumeQualityAssessment?.beforeFingerprint === expectedBeforeFingerprint
-        ? resumeQualityAssessment.before
-        : undefined;
-
-    if (!before) {
-      try {
-        before = await scoreOriginalResumeQualityWithAI(fields, targetRole);
-        if (!resumeQualityAssessment?.before) {
-          const now = new Date().toISOString();
-          setResumeQualityAssessment({
-            version: 1,
-            rubricVersion: 1,
-            targetRole,
-            before,
-            status: "current",
-            beforeFingerprint: expectedBeforeFingerprint,
-            sourceFingerprint: expectedBeforeFingerprint,
-            createdAt: now,
-            updatedAt: now,
-          });
-        }
-      } catch {
-        setResumeQualityState(
-          resumeQualityAssessment?.before ? "error-after" : "error-before",
-        );
-        return;
-      }
-    }
-
-    try {
-      const response = await scoreOptimizedResumeQualityWithAI(
-        fields,
-        bullets,
-        before,
-        targetRole,
-      );
-      const now = new Date().toISOString();
-      setResumeQualityAssessment({
-        version: 1,
-        rubricVersion: 1,
-        targetRole,
-        before,
-        after: response.score,
-        comparison: response.comparison,
-        status: "current",
-        beforeFingerprint: expectedBeforeFingerprint,
-        sourceFingerprint: createComparisonResumeQualityFingerprint(fields, bullets, targetRole),
-        createdAt: resumeQualityAssessment?.createdAt ?? now,
-        updatedAt: now,
-      });
-      setResumeQualityState("ready");
-    } catch {
-      setResumeQualityState("error-after");
-    }
-  }
-
   function confirmRecognitionResult() {
     if (saveState === "saving") return;
 
@@ -872,7 +793,6 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       userEditedRef.current = false;
       setToastMessage("识别结果已确认保存，可以继续进行简历优化和面试准备。");
       window.setTimeout(() => setToastMessage(""), 3000);
-      void requestBeforeResumeQualityScore(confirmedFields);
     }
   }
 
@@ -893,29 +813,60 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
 
     const fields = resumeFieldsFromProject(draft);
     setResumeOptimizeState("loading");
+    setResumeQualityState("loading");
 
     try {
-      const response = await optimizeResumeBulletsWithAI(fields);
-      const bullets = response.bullets.map((item) => item.trim()).filter(Boolean).slice(0, 5);
-      if (!bullets.length) {
-        throw new Error("empty");
-      }
-      setResumeBullets(bullets);
-      setResumeOptimizeState("success");
-      setResumeSaveState("idle");
+      const response = await optimizeResumeBulletsWithAI(fields, targetRole);
+      setResumeQualityAssessment(response.assessment);
+      setResumeQualityState("ready");
       setCopyState("idle");
-      setToastMessage("优化完成");
-      window.setTimeout(() => setToastMessage(""), 2400);
-      void requestAfterResumeQualityScore(fields, bullets);
+
+      for (const [reason, count] of Object.entries(response.assessment.rejectionCounts)) {
+        if (!count) continue;
+        trackEvent("resume_candidate_rejected", {
+          reason,
+          count,
+          targetRole,
+        });
+      }
+
+      if (response.status === "optimized") {
+        setResumeBullets(response.bullets);
+        setResumeOptimizeState("success");
+        setResumeSaveState("idle");
+        trackEvent("resume_optimization_passed", {
+          targetRole,
+          originalTotal: response.assessment.originalTotal,
+          optimizedTotal: response.assessment.optimizedTotal,
+        });
+        setToastMessage("已选出通过质量门槛的优化版本");
+      } else {
+        setResumeOptimizeState("safe-fallback");
+        trackEvent("resume_optimization_safe_fallback", {
+          targetRole,
+          outcome: response.status,
+        });
+        setToastMessage(
+          response.status === "needs-information"
+            ? "当前信息不足，已保留原内容"
+            : "当前版本已较完整，暂不建议替换",
+        );
+        if (!persistResumeQualityAssessment(response.assessment)) {
+          setToastMessage("优化评估已生成，但暂未保存，请稍后重试");
+        }
+      }
+      window.setTimeout(() => setToastMessage(""), 3000);
     } catch {
       setResumeOptimizeState("error");
-      setToastMessage("网络或模型服务异常，请稍后重试");
+      setResumeQualityState("technical-error");
+      trackEvent("resume_optimization_technical_error", { targetRole });
+      setToastMessage("优化暂时失败，请重试");
       window.setTimeout(() => setToastMessage(""), 2600);
     }
   }
 
   async function copyResumeBullets() {
-    if (!resumeBullets.length) return;
+    if (!canUseResumeBullets) return;
 
     try {
       await navigator.clipboard.writeText(resumeBullets.map((bullet) => `- ${bullet}`).join("\n"));
@@ -930,8 +881,8 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
   }
 
   function saveResumeBullets() {
-    if (!resumeBullets.length) {
-      setToastMessage("优化失败，请重试");
+    if (!canUseResumeBullets || !acceptedResumeQualityAssessment) {
+      setToastMessage("请先生成通过质量门槛的优化版本");
       window.setTimeout(() => setToastMessage(""), 2400);
       return;
     }
@@ -944,23 +895,18 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
         originalResumeText: rawMaterial,
         confirmedResumeFields: confirmedFields,
         optimizedResumeBullets: resumeBullets,
-        resumeQualityAssessment: resumeQualityAssessmentForDisplay,
+        resumeQualityAssessment: acceptedResumeQualityAssessment,
       },
     )) {
       userEditedRef.current = false;
       setResumeSaveState("saved");
+      trackEvent("resume_optimization_saved", {
+        targetRole,
+        total: acceptedResumeQualityAssessment.optimizedTotal,
+      });
       setToastMessage("已保存到项目中");
       window.setTimeout(() => setToastMessage(""), 2400);
     }
-  }
-
-  function retryBeforeResumeQualityScore() {
-    void requestBeforeResumeQualityScore(resumeFieldsFromProject(draft));
-  }
-
-  function retryAfterResumeQualityScore() {
-    if (!resumeBullets.length) return;
-    void requestAfterResumeQualityScore(resumeFieldsFromProject(draft), resumeBullets);
   }
 
   async function generateInterviewPreparation() {
@@ -1297,7 +1243,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">步骤 3</p>
                 <h2 className="mt-1 text-xl font-semibold">生成简历表述</h2>
                 <p className="mt-1 text-sm leading-6 text-[var(--text-muted)]">
-                  基于已确认的项目资料生成 3-5 条可直接放入简历的项目 bullet。
+                  一次生成 3 个候选，仅返回通过事实与评分门槛的版本。
                 </p>
               </div>
               <Button onClick={optimizeResumeBullets} disabled={resumeOptimizeState === "loading"}>
@@ -1306,9 +1252,11 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                   ? "优化中..."
                   : resumeOptimizeState === "success"
                     ? "优化完成"
-                    : resumeOptimizeState === "error"
+                    : resumeOptimizeState === "safe-fallback"
                       ? "重新优化"
-                      : "优化简历表达"}
+                      : resumeOptimizeState === "error"
+                        ? "重新优化"
+                        : "优化简历表达"}
               </Button>
             </div>
 
@@ -1340,7 +1288,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="text-base font-semibold">简历优化结果</h3>
                   <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" onClick={copyResumeBullets} disabled={!resumeBullets.length}>
+                    <Button variant="secondary" onClick={copyResumeBullets} disabled={!canUseResumeBullets}>
                       <Clipboard size={15} />
                       {copyState === "success" ? "复制成功" : copyState === "error" ? "复制失败，请重试" : "复制"}
                     </Button>
@@ -1353,13 +1301,18 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
 
                 <div className="max-h-[360px] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-panel)] p-4">
                   {resumeBullets.length ? (
-                    <ul className="list-disc space-y-3 pl-5 text-sm text-[var(--foreground)]">
-                      {resumeBullets.map((bullet, index) => (
-                        <li key={`${bullet}-${index}`} className="break-words leading-7">
-                          {cleanBulletText(bullet)}
-                        </li>
-                      ))}
-                    </ul>
+                    <div>
+                      <p className="mb-3 text-xs font-medium text-[var(--text-subtle)]">
+                        {acceptedResumeQualityAssessment ? "本次通过门槛版本" : "当前已保存版本"}
+                      </p>
+                      <ul className="list-disc space-y-3 pl-5 text-sm text-[var(--foreground)]">
+                        {resumeBullets.map((bullet, index) => (
+                          <li key={`${bullet}-${index}`} className="break-words leading-7">
+                            {cleanBulletText(bullet)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ) : (
                     <p className="text-sm leading-6 text-[var(--text-muted)]">
                       确认识别内容后，点击“优化简历表达”生成结果。
@@ -1368,7 +1321,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 </div>
 
                 <div className="mt-4 flex justify-end">
-                  <Button onClick={saveResumeBullets} disabled={!resumeBullets.length}>
+                  <Button onClick={saveResumeBullets} disabled={!canUseResumeBullets}>
                     <Save size={16} />
                     {resumeSaveState === "saved" ? "已保存到项目中" : "保存优化结果"}
                   </Button>
@@ -1379,8 +1332,7 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
             <ResumeQualityComparison
               assessment={resumeQualityAssessmentForDisplay}
               state={resumeQualityState}
-              onRetryBefore={retryBeforeResumeQualityScore}
-              onRetryAfter={retryAfterResumeQualityScore}
+              onRetry={optimizeResumeBullets}
             />
           </section>
           ) : null}

@@ -7,11 +7,6 @@ import {
   createBeforeResumeQualityFingerprint,
   createComparisonResumeQualityFingerprint,
 } from "../lib/resume-quality/fingerprint.ts";
-import {
-  buildAfterResumeQualityPrompt,
-  buildBeforeResumeQualityPrompt,
-} from "../lib/resume-quality/prompt.ts";
-import { normalizeScoringRequest } from "../lib/resume-quality/service.ts";
 import { formatResumeQualityChange } from "../lib/resume-quality/presentation.ts";
 import { markResumeQualityAssessmentStale } from "../lib/resume-quality/state.ts";
 
@@ -91,33 +86,6 @@ assert.notEqual(
 assert.notEqual(
   createBeforeResumeQualityFingerprint(fields, "产品经理"),
   createComparisonResumeQualityFingerprint(fields, ["优化 bullet"], "产品经理"),
-);
-
-const beforePrompt = buildBeforeResumeQualityPrompt(fields, "产品经理");
-const afterPrompt = buildAfterResumeQualityPrompt(fields, ["优化 bullet"], "产品经理");
-for (const prompt of [beforePrompt, afterPrompt]) {
-  assert.match(prompt, /不得虚构/);
-  assert.match(prompt, /不能判断经历真实性/);
-  assert.match(prompt, /合法 JSON/);
-  assert.match(prompt, /0 到 20/);
-}
-assert.match(afterPrompt, /允许持平或下降/);
-
-assert.equal(normalizeScoringRequest({
-  mode: "before",
-  fields,
-  targetRole: "产品经理",
-}).mode, "before");
-
-assert.throws(
-  () => normalizeScoringRequest({
-    mode: "after",
-    fields,
-    targetRole: "产品经理",
-    optimizedBullets: [],
-    before,
-  }),
-  /optimized bullets/i,
 );
 
 assert.equal(formatResumeQualityChange(8), "+8");
