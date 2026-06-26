@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Clipboard, RotateCcw, Save, SendHorizontal } from "lucide-react";
+import { Clipboard, RotateCcw, Save, SendHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/Button";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -19,6 +19,12 @@ import {
 import { createResumeOptimizationFingerprint } from "@/lib/resume-optimization/fingerprint";
 import { getCurrentResumeQualityAssessment } from "@/lib/resume-quality/state";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
+import {
+  getProjectNameDisplay,
+  isUnnamedProjectName,
+  UNNAMED_PROJECT_NAME,
+  validateProjectName,
+} from "@/lib/project/projectName";
 import type {
   InterviewPreparationItem,
   Project,
@@ -284,6 +290,10 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [lastSavedAt, setLastSavedAt] = useState("");
   const [toastMessage, setToastMessage] = useState("");
+  const [isNameDialogOpen, setIsNameDialogOpen] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [nameError, setNameError] = useState("");
+  const [isNameSaving, setIsNameSaving] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState("");
   const [readError, setReadError] = useState(false);
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -349,6 +359,8 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
       : undefined;
   const canUseResumeBullets =
     resumeBullets.length > 0 && Boolean(acceptedResumeQualityAssessment);
+  const projectNameDisplay = getProjectNameDisplay(draft.name);
+  const projectNameIsUnnamed = isUnnamedProjectName(draft.name);
 
   const visibleSections = useMemo(() => {
     return sectionDefinitions.filter((section) => {
@@ -385,12 +397,13 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
     projectOverrides: Partial<Project> = {},
   ) => {
     const now = new Date().toISOString();
+    const nextName = typeof projectOverrides.name === "string" ? projectOverrides.name : draft.name;
     const normalized: Project = {
       ...draft,
       ...projectOverrides,
-      name: draft.name.trim() || "未命名项目",
-      summary: draft.summary?.trim(),
-      background: draft.background.trim(),
+      name: nextName.trim() || UNNAMED_PROJECT_NAME,
+      summary: (projectOverrides.summary ?? draft.summary)?.trim(),
+      background: (projectOverrides.background ?? draft.background).trim(),
       updatedAt: now,
       editorState: {
         activeSection,
@@ -473,6 +486,15 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
     }));
     return true;
   }, [draft.id, setProjects]);
+
+  useEffect(() => {
+    if (!isNameDialogOpen) return;
+
+    const timer = window.setTimeout(() => {
+      document.getElementById("project-name-input")?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isNameDialogOpen]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -658,6 +680,43 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
   function updateRawMaterial(value: string) {
     markChanged();
     setRawMaterial(value);
+  }
+
+  function openProjectNameDialog() {
+    setNameInput(projectNameIsUnnamed ? "" : draft.name.trim());
+    setNameError("");
+    setIsNameDialogOpen(true);
+  }
+
+  function closeProjectNameDialog() {
+    if (isNameSaving) return;
+    setIsNameDialogOpen(false);
+    setNameError("");
+  }
+
+  function saveProjectName() {
+    if (isNameSaving) return;
+
+    const validation = validateProjectName(nameInput);
+    if (!validation.ok) {
+      setNameError(validation.message);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    setIsNameSaving(true);
+
+    if (persistProject(false, { lastEditedAt: now, lastSavedAt: now }, { name: validation.value, updatedAt: now })) {
+      userEditedRef.current = false;
+      setIsNameDialogOpen(false);
+      setNameError("");
+      setToastMessage("项目名称已更新");
+      window.setTimeout(() => setToastMessage(""), 2400);
+    } else {
+      setNameError("项目名称保存失败，请稍后重试");
+    }
+
+    setIsNameSaving(false);
   }
 
   async function recognizeProject() {
@@ -1029,6 +1088,72 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
   return (
     <div className="mx-auto max-w-7xl">
       <Toast message={toastMessage} />
+      {isNameDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/35 px-4 py-6"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeProjectNameDialog();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") closeProjectNameDialog();
+          }}
+        >
+          <form
+            className="w-full max-w-md rounded-lg border border-[var(--border)] bg-white p-5 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-name-dialog-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveProjectName();
+            }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="project-name-dialog-title" className="text-lg font-semibold">修改项目名称</h2>
+              </div>
+              <button
+                type="button"
+                onClick={closeProjectNameDialog}
+                disabled={isNameSaving}
+                className="rounded-md p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-blue-600/15 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="关闭"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-5">
+              <label htmlFor="project-name-input" className="mb-2 block text-sm font-semibold">项目名称</label>
+              <Input
+                id="project-name-input"
+                value={nameInput}
+                onChange={(event) => {
+                  setNameInput(event.target.value);
+                  if (nameError) setNameError("");
+                }}
+                placeholder="请输入项目名称，例如：校园二手交易平台优化项目"
+                aria-invalid={Boolean(nameError)}
+                aria-describedby={nameError ? "project-name-error" : undefined}
+                disabled={isNameSaving}
+              />
+              {nameError ? (
+                <p id="project-name-error" className="mt-2 text-sm text-[var(--danger)]">{nameError}</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button type="button" variant="secondary" onClick={closeProjectNameDialog} disabled={isNameSaving}>
+                取消
+              </Button>
+              <Button type="submit" disabled={isNameSaving}>
+                {isNameSaving ? "保存中..." : "保存"}
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[224px_minmax(0,1fr)] lg:gap-8">
         <aside className="h-fit overflow-x-auto rounded-lg border border-[var(--border)] bg-white py-2 lg:sticky lg:top-24 lg:overflow-visible lg:py-3">
@@ -1073,6 +1198,19 @@ export function ProjectEditor({ initialProjectId = "" }: { initialProjectId?: st
                 <span className="rounded-md border border-[var(--border-soft)] bg-[var(--surface-panel)] px-2 py-1 text-xs font-medium text-[var(--text-muted)]">
                   {projectStatus}
                 </span>
+              </div>
+              <div className="mt-5 rounded-lg border border-[var(--border)] bg-white px-4 py-3">
+                <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[var(--text-subtle)]">项目名称</p>
+                    <p className="mt-1 truncate text-xl font-semibold tracking-tight text-[var(--foreground)]" title={projectNameDisplay}>
+                      {projectNameDisplay}
+                    </p>
+                  </div>
+                  <Button type="button" onClick={openProjectNameDialog} className="shrink-0">
+                    {projectNameIsUnnamed ? "设置项目名称" : "修改名称"}
+                  </Button>
+                </div>
               </div>
               <div className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
                 saveState === "error"

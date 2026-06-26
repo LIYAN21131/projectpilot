@@ -13,6 +13,7 @@ const RESUME_KEY = "projectpilot.resumeResults";
 const INTERVIEW_KEY = "projectpilot.interviewQuestions";
 const INTERVIEW_PREP_KEY = "projectpilot.interviewPreparations";
 const PROFILE_KEY = "projectpilot.profile";
+const PROJECTS_UPDATED_EVENT = "projectpilot.projects.updated";
 
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -59,7 +60,33 @@ export function useProjectPilotStore() {
 
   useEffect(() => {
     if (!hydrated) return;
-    write(PROJECTS_KEY, projects);
+
+    function syncProjectsFromStorage() {
+      const nextProjects = read<Project[]>(PROJECTS_KEY, []);
+      setProjects((currentProjects) => (
+        JSON.stringify(currentProjects) === JSON.stringify(nextProjects)
+          ? currentProjects
+          : nextProjects
+      ));
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === PROJECTS_KEY) syncProjectsFromStorage();
+    }
+
+    window.addEventListener(PROJECTS_UPDATED_EVENT, syncProjectsFromStorage);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(PROJECTS_UPDATED_EVENT, syncProjectsFromStorage);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (write(PROJECTS_KEY, projects)) {
+      window.dispatchEvent(new Event(PROJECTS_UPDATED_EVENT));
+    }
     write(ASSETS_KEY, assets);
     write(RESUME_KEY, resumeResults);
     write(INTERVIEW_KEY, interviewQuestions);

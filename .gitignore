@@ -78,6 +78,9 @@ web_modules/
 .next
 out
 
+# Local feature worktrees
+.worktrees/
+
 # Nuxt.js build / generate output
 .nuxt
 dist

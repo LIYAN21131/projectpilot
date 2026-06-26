@@ -3,10 +3,15 @@
 import Link from "next/link";
 import { BriefcaseBusiness } from "lucide-react";
 import { useProjectPilotStore } from "@/lib/storage/useProjectPilotStore";
+import { getProjectNameDisplay } from "@/lib/project/projectName";
 
-export function TopBar({ context }: { context?: string }) {
+export function TopBar({ context, currentProjectId }: { context?: string; currentProjectId?: string }) {
   const { projects } = useProjectPilotStore();
-  const currentProject = projects[0]?.name ?? "未整理";
+  const selectedProject = currentProjectId
+    ? projects.find((project) => project.id === currentProjectId)
+    : undefined;
+  const fallbackProject = selectedProject ?? projects[0];
+  const currentProject = fallbackProject ? getProjectNameDisplay(fallbackProject.name) : "未整理";
 
   return (
     <header className="sticky top-0 z-10 flex min-h-16 items-center justify-between gap-4 border-b border-[var(--border)] bg-white/95 px-4 backdrop-blur sm:px-6 md:px-8">

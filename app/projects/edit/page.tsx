@@ -9,7 +9,7 @@ export default async function ProjectEditPage({
   const { projectId } = await searchParams;
 
   return (
-    <AppShell searchPlaceholder="搜索项目档案..." hideSidebar>
+    <AppShell searchPlaceholder="搜索项目档案..." hideSidebar currentProjectId={projectId}>
       <ProjectEditor initialProjectId={projectId} />
     </AppShell>
   );
